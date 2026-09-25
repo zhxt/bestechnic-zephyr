@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "BES2700YP dual-core validation"
+source "Kconfig.zephyr"
+config DUAL_CC_PAIR
+ hex "Message image pair identity"
+ default 0
+config DUAL_M55_BUILD
+ hex "M55 image source identity"
+ default 0
+
+config BTH_LOG_PREFIX
+ bool
+ default y
+config DUAL_DURATION_SECONDS
+ int "Dual heartbeat duration in seconds"
+ range 600 3610
+ default 3610
+
+config DUAL_IPC_SECONDS
+ int "Active concurrent traffic duration"
+ range 600 3600
+ default 3600
+
+config DUAL_MSG_MODE
+ int "Message validation: 1=sequential, 2=concurrent, 3=negative"
+ range 1 3
+ default 1

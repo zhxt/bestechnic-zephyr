@@ -1,0 +1,21 @@
+/* Reserve future 8 KiB IPC queues even in V08a. */
+&m55_dtcm { reg = <0x200c0000 0x0009c000>; };
+
+/* Copyright The Zephyr Project Contributors */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/ {
+	mbox_peer: mailbox@500000a0 {
+		compatible = "bestechnic,bes2700-mbox";
+		reg = <0x500000a0 0x8>, <0x40000134 0x8>;
+		reg-names = "sys", "bth";
+		interrupt-parent = <&nvic>;
+		interrupts = <41 3>, <39 3>;
+		interrupt-names = "rx", "tx-done";
+		#mbox-cells = <1>;
+		status = "okay";
+	};
+};
+
+/ { reserved-memory { db_diag: memory@2015e200 { reg = <0x2015e200 0x80>; }; }; };
+/ { reserved-memory { msg_shared: memory@2015c000 { reg = <0x2015c000 0x2000>; }; }; };

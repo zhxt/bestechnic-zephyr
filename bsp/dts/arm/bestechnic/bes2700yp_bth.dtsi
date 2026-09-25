@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+#include <arm/armv8-m.dtsi>
+#include <mem.h>
+/ {
+	compatible = "bestechnic,bes2700yp-bth";
+	bth_uart0: serial@4000b000 {
+		compatible = "bestechnic,bes2700-bth-uart";
+		reg = <0x4000b000 0x1000>;
+		interrupts = <17 2>;
+		interrupt-parent = <&nvic>;
+		clock-frequency = <24000000>;
+		current-speed = <1152000>;
+		status = "disabled";
+	};
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-m33";
+			reg = <0>;
+			/* Adapter explicitly selects crystal and checks the SDK readback. */
+			clock-frequency = <24000000>;
+		};
+	};
+	/* XIP linker semantics; physically RAM, filled by the boot adapter. */
+	bth_code: memory@510000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x00510000 DT_SIZE_K(192)>;
+		zephyr,memory-region = "BTHCODE";
+	};
+	bth_data: memory@20540000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x20540000 DT_SIZE_K(112)>;
+		zephyr,memory-region = "BTHDATA";
+	};
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		adapter: memory@20500000 { reg = <0x20500000 DT_SIZE_K(64)>; };
+		handoff: memory@2055c000 { reg = <0x2055c000 0x3fe0>; };
+		mailbox: memory@2055ffe0 { reg = <0x2055ffe0 0x20>; };
+	};
+};
+&nvic { arm,num-irq-priority-bits = <3>; };

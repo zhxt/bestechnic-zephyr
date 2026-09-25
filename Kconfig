@@ -1,0 +1,5 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+rsource "bsp/drivers/mbox/Kconfig"
+rsource "bsp/drivers/serial/Kconfig"

@@ -1,0 +1,8 @@
+# Base dependencies belong to the pinned Zephyr revision in west.yml.
+-r ../zephyr/scripts/requirements-base.txt
+
+# Versions used by the validated Python 3.12 build and local checks.
+west==1.4.0
+PyYAML==6.0.2
+pyelftools==0.32
+packaging==25.0

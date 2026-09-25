@@ -1,0 +1,15 @@
+identifier: bes2700yp_devkit/bes2700yp/bth
+name: BES2700YP Development Kit BTH V05
+type: mcu
+arch: arm
+ram: 112
+toolchain:
+  - zephyr
+  - cross-compile
+testing:
+  default: false
+  ignore_tags:
+    - net
+    - bluetooth
+supported:
+  - kernel

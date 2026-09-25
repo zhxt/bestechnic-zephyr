@@ -1,0 +1,74 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <arm/armv8.1-m.dtsi>
+#include <mem.h>
+
+/ {
+	compatible = "bestechnic,bes2700yp-cm55";
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-m55";
+			reg = <0>;
+			/* BTH boot test requests the 24 MHz crystal SYS clock. */
+			clock-frequency = <24000000>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			mpu: mpu@e000ed90 {
+				compatible = "arm,armv8.1m-mpu";
+				reg = <0xe000ed90 0x40>;
+			};
+		};
+	};
+
+	m55_itcm: itcm@a0000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x000a0000 DT_SIZE_K(256)>;
+		zephyr,memory-region = "ITCM";
+	};
+
+	/*
+	 * The full BES SDK DTCM window is 0x200c0000..0x2015ffff.
+	 * Keep 0x2015e000..0x2015ffff out of Zephyr's main SRAM so the
+	 * initial payload cannot overwrite the loader trampoline, shared IPC
+	 * window or the vendor mailbox at 0x2015ffe0.
+	 */
+	m55_dtcm: dtcm@200c0000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x200c0000 0x0009e000>;
+		zephyr,memory-region = "DTCM";
+	};
+
+	m55_loader: memory@2015e000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x2015e000 0x00000100>;
+		zephyr,memory-region = "M55LOADER";
+	};
+
+	m55_shared: memory@2015e100 {
+		compatible = "zephyr,memory-region";
+		reg = <0x2015e100 0x00001ee0>;
+		zephyr,memory-region = "M55SHARED";
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		m55_mailbox: memory@2015ffe0 {
+			reg = <0x2015ffe0 0x00000020>;
+		};
+	};
+};
+
+&nvic {
+	arm,num-irq-priority-bits = <3>;
+};

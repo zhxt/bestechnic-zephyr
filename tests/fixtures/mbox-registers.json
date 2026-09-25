@@ -1,0 +1,52 @@
+{
+  "source_headers": {
+    "reg_cmu_best1600.h": "4a861e8e02fe9fed0abe8936de8997c9728bf6f55a23b9a3c54838cc12ffe695",
+    "reg_bthcmu_best1600.h": "5f1602fe488aa108632d481e008c78838a5aa395198e2b05e58374f04ad0cc0e"
+  },
+  "bits": {
+    "SYS_TX_IND": {
+      "vendor_symbol": "CMU_SYS2BTH_DATA1_IND_SET",
+      "bit": 3
+    },
+    "SYS_TX_DONE": {
+      "vendor_symbol": "CMU_BTH2SYS_DATA1_DONE_CLR",
+      "bit": 1
+    },
+    "SYS_RX_MASK": {
+      "vendor_symbol": "CMU_BTH2SYS_DATA1_MSK_SET",
+      "bit": 14
+    },
+    "SYS_TX_MASK": {
+      "vendor_symbol": "CMU_SYS2BTH_DATA1_MSK_SET",
+      "bit": 16
+    },
+    "SYS_RX_ACTIVE": {
+      "vendor_symbol": "CMU_BTH2SYS_DATA1_INTR_MSK",
+      "bit": 22
+    },
+    "SYS_TX_ACTIVE": {
+      "vendor_symbol": "CMU_SYS2BTH_DATA1_INTR_MSK",
+      "bit": 24
+    },
+    "BTH_TX_IND": {
+      "vendor_symbol": "BTH_CMU_BTH2SYS_DATA1_IND_CLR",
+      "bit": 3
+    },
+    "BTH_RX_MASK": {
+      "vendor_symbol": "BTH_CMU_SYS2BTH_DATA1_MSK_SET",
+      "bit": 5
+    },
+    "BTH_TX_MASK": {
+      "vendor_symbol": "BTH_CMU_BTH2SYS_DATA1_MSK_SET",
+      "bit": 7
+    },
+    "BTH_RX_ACTIVE": {
+      "vendor_symbol": "BTH_CMU_SYS2BTH_DATA1_INTR_MSK",
+      "bit": 14
+    },
+    "BTH_TX_ACTIVE": {
+      "vendor_symbol": "BTH_CMU_BTH2SYS_DATA1_INTR_MSK",
+      "bit": 16
+    }
+  }
+}

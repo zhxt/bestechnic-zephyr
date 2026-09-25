@@ -1,0 +1,8 @@
+{
+  "source": "Q2r1 adapter at port 1638458f21118b5f5fe8fc0bfcc4f3b534a8da52",
+  "elf_sha256": "546a1b98d9d7649a4b13036c3725fa6f5ffcc4270d795f4de21cbe0b6aa4c9ed",
+  "functions": {
+    "bth_crc32": "aa15595ea7b355ac2b469b7c2d6542ad36f0eefa66f5f0ea1021aab521028035",
+    "bth_copy_bytes": "f5669bdbb2593349ad830651c37d522303f9bd3898ed3cf1a1dd26c40f6fe09c"
+  }
+}

@@ -1,0 +1,6 @@
+board:
+  name: bes2700yp_devkit
+  full_name: BES2700YP Development Kit
+  vendor: bestechnic
+  socs:
+    - name: bes2700yp

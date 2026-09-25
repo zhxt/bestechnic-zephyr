@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_BES2700YP_DEVKIT
+
+endif # BOARD_BES2700YP_DEVKIT

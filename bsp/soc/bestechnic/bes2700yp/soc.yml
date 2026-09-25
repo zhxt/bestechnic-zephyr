@@ -1,0 +1,9 @@
+family:
+  - name: bestechnic_bes
+    series:
+      - name: bes2700
+        socs:
+          - name: bes2700yp
+            cpuclusters:
+              - name: cm55
+              - name: bth

@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/dts-v1/;
+#include <bestechnic/bes2700yp_bth.dtsi>
+/ {
+	model = "BES2700YP BTH V05 bring-up";
+	compatible = "bestechnic,bes2700yp-devkit";
+	chosen {
+		zephyr,flash = &bth_code;
+		zephyr,sram = &bth_data;
+	};
+};

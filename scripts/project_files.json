@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "ignored_directories": [".git", ".venv", ".west", "build", "__pycache__", ".pytest_cache"],
+  "ignored_names": ["*.pyc", "*.swp", "*.swo", "*.swx", "*~", ".env", ".env.*", ".DS_Store"],
+  "source_suffixes": [".c", ".h", ".S", ".py", ".cmake", ".txt", ".conf", ".overlay", ".yaml", ".yml", ".dts", ".dtsi", ".ld", ".json"],
+  "source_names": ["CMakeLists.txt", "Kconfig*", "*_defconfig"],
+  "build": {
+    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "scripts/project_files.json", "scripts/project_files.py", "scripts/package_source.py", "scripts/hal_blobs.py", "scripts/module_lock.py", "scripts/firmware.py", "scripts/validation_profiles.py", "scripts/audit_dual.py", "scripts/check_bth_layout.py", "scripts/pack_bth_payload.py", "scripts/pack_m55_payload.py", "apps/bes2700yp/bth/src/main.c", "apps/bes2700yp/m55/src/main.c", "platforms/bes2700yp/boot/t2-machine-code.json"],
+    "directories": ["apps", "bsp", "include", "platforms", "sysbuild"]
+  },
+  "archive": {
+    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "README.md", "README.zh-CN.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.zh-CN.md", "CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md", ".gitignore", ".editorconfig", ".gitattributes", "requirements.txt", "scripts/project_files.json", "docs/getting-started.md", "docs/getting-started.zh-CN.md", "docs/architecture.md", "docs/architecture.zh-CN.md", "docs/testing.md", "docs/testing.zh-CN.md", "docs/hal.md", "docs/hal.zh-CN.md", "docs/hardware/bes2700yp.md", "docs/hardware/bes2700yp.zh-CN.md"],
+    "directories": ["apps", "bsp", "include", "platforms", "sysbuild", "scripts", "tests"]
+  },
+  "binary_fixtures": []
+}

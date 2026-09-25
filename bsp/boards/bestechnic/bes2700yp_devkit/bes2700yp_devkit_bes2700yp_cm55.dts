@@ -1,0 +1,19 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include <bestechnic/bes2700yp_cm55.dtsi>
+
+/ {
+	model = "BES2700YP Development Kit M55";
+	compatible = "bestechnic,bes2700yp-devkit";
+
+	chosen {
+		zephyr,flash = &m55_itcm;
+		zephyr,sram = &m55_dtcm;
+		zephyr,itcm = &m55_itcm;
+		zephyr,dtcm = &m55_dtcm;
+	};
+};

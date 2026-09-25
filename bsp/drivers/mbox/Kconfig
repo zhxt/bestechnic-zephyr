@@ -1,0 +1,13 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config MBOX_BES2700
+	bool "BES2700 SYS to BTH doorbell"
+	default y
+	depends on MBOX
+	depends on SOC_BES2700YP_CM55 || SOC_BES2700YP_BTH
+	depends on DT_HAS_BESTECHNIC_BES2700_MBOX_ENABLED
+	help
+	  Signalling-only SYS/BTH mailbox using hardware channel 1. Logical channel
+	  0 is exposed to clients. Hardware channel 0 remains owned by the loader.
+	  Repeated sends while busy coalesce into one pending notification.

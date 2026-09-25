@@ -1,0 +1,8 @@
+name: bestechnic_zephyr
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    board_root: bsp
+    soc_root: bsp
+    dts_root: bsp

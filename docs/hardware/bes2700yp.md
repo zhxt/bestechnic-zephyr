@@ -1,0 +1,114 @@
+# BES2700YP Hardware and Supported Features
+
+[简体中文](bes2700yp.zh-CN.md)
+
+## Chip resources
+
+This overview is based on the official BES [product page](https://www.bestechnic.com/en/article/78/64.html) and [brief data sheet](https://www.bestechnic.com/Uploads/keditor/file/20241010/20241010185852_50097.pdf). It describes chip resources; the integration's actual support is listed below.
+
+| Category | Publicly described resources |
+|---|---|
+| Main processor | Arm Cortex-M55 with instruction/data TCM and cache |
+| Bluetooth Host (BTH) | STAR-MC1 |
+| Sensor Hub | STAR-MC1, sensor engine, BECO NPU |
+| Memory | Shared 4 MB SRAM, in-package flash, boot ROM |
+| Bluetooth | Dual-mode Bluetooth 5.3, LE Audio |
+| Audio | Two DACs, four ADCs, ANC, EQ, and related blocks |
+| Interfaces | GPADC, SPI, I²C, UART, I²S, TDM, SPDIF, DMIC, PWM, GPIO, and others |
+| Security | Security engine, TRNG, eFuse |
+| System | DMA, timers, watchdog, JTAG/SWD, and others |
+
+Total shared SRAM is not the capacity available to either Zephyr kernel; see [runtime memory layout](#runtime-memory-layout). The public summary does not specify flash size, peak clock rate, or peripheral instance counts. Consult the relevant BES documentation for exact part specifications.
+
+## Boards and build targets
+
+The project runs separate Zephyr kernels on the BTH and M55 subsystems:
+
+| Subsystem | Processor | Build target |
+|---|---|---|
+| BTH | STAR-MC1 | `bes2700yp_devkit/bes2700yp/bth` |
+| M55 | Cortex-M55 | `bes2700yp_devkit/bes2700yp/cm55` |
+
+Start sysbuild from BTH to create a complete image; M55 is a child image. Building M55 alone does not create a flashable full image.
+
+STAR-MC1 is BTH's hardware processor name; the current Zephyr port uses a Cortex-M33 target configuration. See [SoC Kconfig](../../bsp/soc/bestechnic/bes2700yp/Kconfig) and [BTH DTS](../../bsp/dts/arm/bestechnic/bes2700yp_bth.dtsi). Hardware identity and software target configuration are distinct.
+
+`bes2700yp_devkit` is a project board-target name, not proof of physical-board compatibility. `V05` in board files is not evidence of a hardware revision. Support is limited to BES2700YP; other BES2700/BES2800 variants need separate adaptation and validation.
+
+The repository does not yet record enough hardware information to infer wiring or flashing setup. Confirm these items from official board materials or the board provider before connecting hardware:
+
+| Item | Information to confirm |
+|---|---|
+| Board identity | Full model, part number, PCB marking, and revision |
+| Power | Connector, voltage, and supply method |
+| Serial | Connector location, TX/RX/GND pins, and logic level |
+| Download | Connector, connection method, and download-mode procedure |
+
+When adding this information, record the source and applicable board revision. Hardware reports must identify the same board. After confirming wiring and download mode, use the official BES DldProductLine tool as described in [flashing requirements](../getting-started.md#flashing-requirements).
+
+## Supported features
+
+This section describes the current code and default dual-core application on `main`. Implemented behavior does not itself establish hardware validation; check reports for the specific image. The [README summary](../../README.md#current-support) compares public chip resources with integration status.
+
+### Implemented behavior and defaults
+
+| Feature | Implementation | Default application | Limits |
+|---|---|---|---|
+| Dual-core boot and kernels | Bootstrap starts BTH; BTH loads and starts M55; both use Zephyr threads, timers, and synchronization | Two independent kernels enabled | No Zephyr SMP; matching HAL required |
+| Inter-core notification | [Mailbox driver](../../bsp/drivers/mbox/mbox_bes2700.c) exposes Zephyr MBOX API | `CONFIG_MBOX` and `CONFIG_MBOX_BES2700` enabled on both cores | Notification only, not message data; busy repeats coalesce |
+| Shared-memory messaging | [Message workers](../../platforms/bes2700yp/ipc/worker.c) exchange data and use mailbox notification | Bidirectional messages enabled | Project-specific protocol; no Zephyr IPC service/RPMsg integration |
+| BTH UART | [Driver](../../bsp/drivers/serial/uart_bes2700.c) provides polling and interrupt APIs | Zephyr Serial/Console disabled; bootstrap UART carries logs | Fixed 8N1, bootstrap clock/pin setup; no async/DMA or runtime format API |
+| System clock/tick | Zephyr Cortex-M SysTick; HAL configures startup clock | Both cores at 24 MHz, 1000 ticks/s; `CONFIG_TICKLESS_KERNEL=n`, `CONFIG_PM=n` | 24 MHz is a project setting, not peak chip frequency; no DVFS or Zephyr system PM |
+| FPU/MPU | [SoC configuration](../../bsp/soc/bestechnic/bes2700yp/Kconfig) declares capability; M55 has [MPU regions](../../bsp/soc/bestechnic/bes2700yp/mpu_regions.c) | Both apps set `CONFIG_FPU=n`, `CONFIG_ARM_MPU=n`, `CONFIG_HW_STACK_PROTECTION=n` | Enabling requires separate runtime validation |
+| Runtime memory | DTS/linker scripts specify layout; bootstrap initializes hardware | Uses [current layout](#runtime-memory-layout) | Boot and loading require matching HAL and layout |
+
+Mailbox hardware channel 1 appears as logical Zephyr channel 0; channel 0 is reserved for the vendor loader. See the [binding](../../bsp/dts/bindings/mbox/bestechnic,bes2700-mbox.yaml). Shared-memory protocol moves and checks data; notification count is not message count.
+
+The UART driver supports BTH only. BTH's UART device node and Zephyr Serial/Console are disabled by default on both cores. Seeing logs does not mean that driver or Console is enabled; see [serial and logging](#serial-and-logging).
+
+### Resources not integrated
+
+This table concerns this repository, regardless of upstream Zephyr subsystem availability:
+
+| Chip resource | Current project scope |
+|---|---|
+| Bluetooth / LE Audio | No controller/HCI, stack, or audio application integration |
+| Audio | No ADC/DAC, I²S/TDM/SPDIF/DMIC, or ANC/EQ path |
+| Sensor Hub / BECO NPU | No startup, Zephyr target, or NPU runtime interface |
+| Flash read/write | HAL supports boot-time flash operations; no Zephyr flash driver or standard application interface |
+| GPIO, I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers |
+| Security | No security-engine, TRNG, eFuse, or secure-boot validation; image CRC checks integrity only |
+
+### Configuration and validation evidence
+
+Default applications use [BTH prj.conf](../../apps/bes2700yp/bth/prj.conf) and [M55 prj.conf](../../apps/bes2700yp/m55/prj.conf). Application settings override board defaults: the M55 board enables FPU/MPU, while the current app disables them. For a particular image, inspect `release/bth.config`, `release/m55.config`, and generated DTS.
+
+[Mailbox](../../tests/host/test_mbox_bes2700.py), [UART](../../tests/host/test_uart_bes2700.py), and [message-worker](../../tests/host/test_message_workers.py) host regressions cover modelable behavior. Builds and offline audits check image generation, load layout, and package consistency, not hardware operation. The package records `hardware: not_tested` when built; later reports link actual testing to an image SHA256 without rewriting the original package. See [testing](../testing.md).
+
+## Serial and logging
+
+| Parameter | Setting |
+|---|---|
+| Baud | `1152000` (1.152 Mbaud) |
+| Data bits | 8 |
+| Parity | None |
+| Stop bits | 1 |
+| Flow control | Disable hardware and software flow control |
+
+Bootstrap and the current BTH application emit boot and runtime logs through BTH UART. BTH reads and reports M55 status; a separate M55 serial console is disabled by default. See the [boot contract](../../platforms/bes2700yp/boot/bootstrap/bth_contract.h) and [BTH application](../../apps/bes2700yp/bth/src/main.c). Confirm physical wiring from board documentation, not chip pin-mux source. [Testing](../testing.md#hardware-validation) describes complete log collection.
+
+## Runtime memory layout
+
+These are the principal runtime regions for the current `main` dual-core application; lengths use KiB (1024 bytes):
+
+| Region | Start | Length |
+|---|---|---:|
+| BTH vectors and code | `0x00510000` | 192 KiB |
+| BTH data | `0x20540000` | 112 KiB |
+| M55 vectors and code | `0x000a0000` | 256 KiB |
+| M55 application data | `0x200c0000` | 624 KiB |
+| Shared messaging | `0x2015c000` | 8 KiB |
+
+The [BTH DTS](../../bsp/dts/arm/bestechnic/bes2700yp_bth.dtsi) and [boot contract](../../platforms/bes2700yp/boot/bootstrap/bth_contract.h) define BTH regions. The [base M55 DTS](../../bsp/dts/arm/bestechnic/bes2700yp_cm55.dtsi) provides 632 KiB of data memory; the current [overlay](../../apps/bes2700yp/m55/app.overlay) reduces it to 624 KiB, reserving 8 KiB for shared messages.
+
+Code regions here are runtime memory loaded by the boot process. The board DTS `zephyr,flash` choice is for link layout and does not make these regions physical flash. The table omits some boot, diagnostic, and service reservations; use generated DTS, link results, and `release/offline-validation.json` for the complete allocation. See [offline audit](../architecture.md#offline-audit). These runtime addresses are not flash addresses.

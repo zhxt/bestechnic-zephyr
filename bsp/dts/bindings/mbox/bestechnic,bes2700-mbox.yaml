@@ -1,0 +1,30 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  BES2700 SYS to BTH signalling mailbox. This instance owns hardware
+  channel 1 only, exposed as logical channel 0. Hardware channel 0 is reserved
+  for the vendor loader. Register windows contain only SET and CLR registers;
+  reg-names are sys and bth. Interrupt names are rx and tx-done on the selected local endpoint.
+
+compatible: "bestechnic,bes2700-mbox"
+
+include: [base.yaml, mailbox-controller.yaml]
+
+properties:
+  endpoint-bth:
+    type: boolean
+    description: Select the BTH local register and interrupt layout.
+  reg:
+    required: true
+  reg-names:
+    required: true
+  interrupts:
+    required: true
+  interrupt-names:
+    required: true
+  "#mbox-cells":
+    const: 1
+
+mbox-cells:
+  - channel

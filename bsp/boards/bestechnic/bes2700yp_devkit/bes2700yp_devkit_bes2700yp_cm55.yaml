@@ -1,0 +1,14 @@
+identifier: bes2700yp_devkit/bes2700yp/cm55
+name: BES2700YP Development Kit M55
+type: mcu
+arch: arm
+ram: 632
+toolchain:
+  - zephyr
+testing:
+  default: true
+  ignore_tags:
+    - net
+    - bluetooth
+supported:
+  - kernel

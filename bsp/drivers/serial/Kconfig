@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+config UART_BES2700
+	bool "BES2700 BTH UART (boot adapter clock and pins)"
+	default y
+	depends on DT_HAS_BESTECHNIC_BES2700_BTH_UART_ENABLED
+	depends on SERIAL && SOC_BES2700YP_BTH
+	select SERIAL_HAS_DRIVER
+	select SERIAL_SUPPORT_INTERRUPT
+	help
+	  Fixed 8N1 UART using the clock and pinmux prepared by the BTH boot
+	  adapter. Supports polling and interrupt API, not DMA or clock gating.
