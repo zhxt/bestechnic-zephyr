@@ -43,6 +43,10 @@ def main():
         raise ValueError('isolation output must be a fresh directory')
     if not workspace.is_relative_to(workspace.parent) or workspace == workspace.parent:
         raise ValueError('invalid workspace')
+    # Bubblewrap needs existing mount points beneath the read-only source bind.
+    # A fresh west workspace need not have run a build yet.
+    (workspace / 'build').mkdir(exist_ok=True)
+    (workspace / 'zephyr/.cache').mkdir(exist_ok=True)
     output.mkdir(parents=True)
     common = ['bwrap', '--die-with-parent', '--unshare-net', '--ro-bind', '/', '/',
               '--tmpfs', '/tmp', '--tmpfs', str(workspace.parent), '--tmpfs', str(sdk),
