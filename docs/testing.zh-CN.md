@@ -47,13 +47,13 @@
   --cross-compile "${CROSS_COMPILE:?Set up the toolchain first}"
 ```
 
-`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表四种场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建全部四种场景，但不进行实板验收。
+`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表全部五种场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建四种消息场景，但不进行实板验收；重启场景可单独选择 `--profiles m55-restart`。
 
 输出目录包含 `summary.json`、`repository.log`、`host.log`，以及所选配置的构建日志和构建目录。预期汇总 `status` 为 `pass`、各项 `exit_code` 为 0；所构建包的 `SHA256SUMS` 也会被核对。脚本不操作硬件，汇总中的 `hardware` 保持 `not_tested`。正式候选可追加 `--formal`，要求见[候选包来源](../CONTRIBUTING.zh-CN.md#候选包来源)。
 
 ## 专项验证配置
 
-四种验证场景是 `BES_VALIDATION_PROFILE` 选择的测试参数组合，不表示源码版本。它们用于针对通信行为执行专项验证，参数定义见[验证场景表](../scripts/validation_profiles.py)，由[固件配置脚本](../scripts/firmware.py)生成两核配置。
+`BES_VALIDATION_PROFILE` 选择验证行为，不表示源码版本。四种消息场景使用原有 IPC ABI；`m55-restart` 使用独立的保留内存生命周期契约。场景参数见[验证场景表](../scripts/validation_profiles.py)，由[固件配置脚本](../scripts/firmware.py)生成两核配置。
 
 默认选择 `ipc-backpressure`，运行 600 秒双向背压通信，BTH 观察至 610 秒后结束验证并停止 M55。当前两核应用用于有限时长的适配验证，`BES_VALIDATION_PROFILE` 是该应用的场景选择入口，业务应用需按自身运行要求配置。
 
@@ -65,8 +65,11 @@
 | ipc-backpressure | 双向持续通信 600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 610 秒 |
 | ipc-fault-injection | 双端错误注入、错误检测及前后正常通信检查，完成后继续观察心跳 | 600 秒 |
 | ipc-backpressure-1h | 双向持续通信 3600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 3610 秒 |
+| m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 600 秒 |
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
+
+`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；完整运行需包含 11 次会话和至少 601 条 BTH 心跳。该场景是新的实板候选，主机和构建通过不代表已经实板通过。
 
 以下以 ipc-fault-injection 为例；选择其他配置时修改变量，各配置使用独立构建目录：
 
@@ -116,7 +119,7 @@ mkdir -p validation
 
 ### 解析与判读
 
-当前双核消息应用使用包内 `analyze_dual_message.py`。它联合检查启动、启动计时、心跳和消息记录。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
+四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
 
 ```sh
 .venv/bin/python "$BES_TEST_DIR/release/analyze_dual_message.py" \
@@ -135,7 +138,7 @@ mkdir -p validation
 
 顶层 `status` 只表示日志中最后一次启动的结果。检查 `session_count` 和每个 `sessions` 条目的 `status`、`errors`、`missing`，不能用最后一次通过覆盖先前失败或不完整的启动。建议每轮独立保存日志和报告；预期单轮报告只有一个 session，且状态为 `pass`、`errors` 和 `missing` 为空。报告中的计时 warnings 仍需按其提示复核。
 
-正式候选应分别构建并实板验收四种场景。`ipc-sequential`、`ipc-fault-injection` 和 `ipc-backpressure-1h` 各保存至少一次独立启动的完整日志与报告；`ipc-backpressure` 保存三次。顺序消息场景核对双向各 10000 条及后续心跳，错误注入场景核对检测及恢复后的正常通信，一小时场景核对完整持续时间和最终闭环计数。每轮使用 `run-01`、`run-02` 等文件名，并按该包的 `layout.json` 解析。解析器不能证明是否断电，冷启动结论必须同时有操作记录。固件身份变化后，应根据改动范围重新验证并生成对应报告。
+消息正式候选应分别构建并实板验收四种消息场景。`ipc-sequential`、`ipc-fault-injection` 和 `ipc-backpressure-1h` 各保存至少一次独立启动的完整日志与报告；`ipc-backpressure` 保存三次。顺序消息场景核对双向各 10000 条及后续心跳，错误注入场景核对检测及恢复后的正常通信，一小时场景核对完整持续时间和最终闭环计数。重启候选按[重启契约](m55-restart.zh-CN.md)完成三次独立物理断电重启的完整运行。每轮使用 `run-01`、`run-02` 等文件名，并按该包的 `layout.json` 解析。解析器不能证明是否断电，冷启动结论必须同时有操作记录。固件身份变化后，应根据改动范围重新验证并生成对应报告；旧消息场景的实板证据不适用于字节已变化的新镜像。
 
 ### 测试记录
 

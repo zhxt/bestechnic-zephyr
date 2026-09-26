@@ -63,6 +63,7 @@ BTH 的官方处理器名称为 STAR-MC1，当前 Zephyr 移植使用 Cortex-M33
 | 系统计时与时钟 | Zephyr Cortex-M SysTick，HAL 完成启动时钟配置 | 两核均配置为 24 MHz，内核每秒 1000 tick；`CONFIG_TICKLESS_KERNEL=n`、`CONFIG_PM=n` | 24 MHz 是工程配置，不表示芯片最高主频；未集成动态调频与 Zephyr 系统低功耗管理 |
 | FPU / MPU | [SoC 配置](../../bsp/soc/bestechnic/bes2700yp/Kconfig)声明硬件能力，M55 提供 [MPU 区域定义](../../bsp/soc/bestechnic/bes2700yp/mpu_regions.c) | 两核应用均设置 `CONFIG_FPU=n`、`CONFIG_ARM_MPU=n`、`CONFIG_HW_STACK_PROTECTION=n` | 默认应用不覆盖这些功能，启用后的运行验证需单独完成 |
 | 启动与运行内存 | DTS/链接脚本定义运行布局，bootstrap 使用 HAL 初始化硬件；见[架构说明](../architecture.zh-CN.md) | 使用当前[运行内存布局](#运行内存布局) | 启动和装载依赖匹配的 HAL 模块及内存布局 |
+| M55 正常重启 | 可选 `m55-restart` 场景保留 RAM，由 BTH 停止并重启 M55 | 默认场景不启用；新候选待实板验证 | 仅覆盖协作停止；见[重启契约](../m55-restart.zh-CN.md) |
 
 mailbox 使用硬件通道 1，对 Zephyr 客户端暴露逻辑通道 0；硬件通道 0 保留给厂商 loader，见 [mailbox 绑定](../../bsp/dts/bindings/mbox/bestechnic,bes2700-mbox.yaml)。共享内存消息协议负责传递和校验数据，通知次数不等于消息条数。
 

@@ -42,6 +42,7 @@ extern struct device devices[2];
 typedef void (*mbox_callback_t)(const struct device *,uint32_t,void *,struct mbox_msg *);
 int k_sem_take(struct k_sem *,int64_t);
 void k_sem_give(struct k_sem *);
+static inline void k_sem_reset(struct k_sem *s) { s->count=0; }
 void k_msleep(int);
 int64_t k_uptime_get(void);
 uint32_t k_uptime_get_32(void);

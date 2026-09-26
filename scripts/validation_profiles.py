@@ -20,6 +20,7 @@ PROFILES = MappingProxyType({
     'ipc-backpressure': ValidationProfile(2, 600, 610),
     'ipc-fault-injection': ValidationProfile(3, 600, 600),
     'ipc-backpressure-1h': ValidationProfile(2, 3600, 3610),
+    'm55-restart': ValidationProfile(1, 600, 600, True),
 })
 
 

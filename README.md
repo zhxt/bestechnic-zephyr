@@ -61,6 +61,7 @@ The full image is `build/bes2700yp/main/zephyr.bin`; accompanying files are in `
 - [Setup and build](docs/getting-started.md)
 - [BES2700YP hardware and supported features](docs/hardware/bes2700yp.md)
 - [Testing and release validation](docs/testing.md)
+- [M55 normal restart validation](docs/m55-restart.md)
 - [Architecture and code ownership](docs/architecture.md)
 - [Bestechnic HAL module](docs/hal.md)
 - [Contributing](CONTRIBUTING.md)

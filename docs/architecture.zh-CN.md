@@ -29,7 +29,7 @@ M55 ELF
 
 ## 启动流程
 
-当前默认应用在完成有限时长的通信验证后由 BTH 停止 M55；验证场景见[测试说明](testing.zh-CN.md#专项验证配置)。
+当前默认应用在完成有限时长的通信验证后由 BTH 停止 M55。可选的 `m55-restart` 场景保持 BTH 运行，正常停止并重启 M55 十次；见[测试说明](testing.zh-CN.md#专项验证配置)与[重启契约](m55-restart.zh-CN.md)。
 
 1. bootstrap 在 BTH 核上完成早期硬件初始化，检查 BTH payload，将其复制到目标内存并核对校验值。
 2. bootstrap 建立硬件服务入口，准备中断和处理器状态，然后交接到 BTH Zephyr。
@@ -51,6 +51,7 @@ HAL 静态库只链接 bootstrap，BTH 和 M55 的 Zephyr 镜像不直接链接�
 | [apps/bes2700yp/m55](../apps/bes2700yp/m55) | M55 应用及构建配置 |
 | [bsp/](../bsp) | 板卡、SoC、DTS 和驱动 |
 | [platforms/bes2700yp/boot/bootstrap](../platforms/bes2700yp/boot/bootstrap) | BTH 启动交接、硬件服务和诊断 |
+| [platforms/bes2700yp/lifecycle](../platforms/bes2700yp/lifecycle)、[platforms/bes2700yp/resources.json](../platforms/bes2700yp/resources.json) | M55 重启管理器与资源契约 |
 | [platforms/bes2700yp/ipc](../platforms/bes2700yp/ipc)、[include/bestechnic/bes2700yp](../include/bestechnic/bes2700yp) | 核间消息实现、公共接口及共享内存布局 |
 | [sysbuild/](../sysbuild)、[scripts/](../scripts) | 多镜像构建、打包、审计、日志分析及源码归档 |
 | [tests/](../tests) | 主机回归和构建检查 |
@@ -85,5 +86,6 @@ Git 提交与源码归档记录来源；构建输入摘要及派生标识用于�
 - 两核配置：mailbox 中断绑定、DTS、通信参数和 `pair` 标识符合约定。
 - 早期 RAM 放置：Flash 初始化所需代码和状态位于早期 RAM 段，关键启动函数位于预期区间。
 - 启动代码基准：`bth_crc32` 和 `bth_copy_bytes` 的机器码哈希与 [t2-machine-code.json](../platforms/bes2700yp/boot/t2-machine-code.json) 中的基准一致，并检查启动路径中的调用次数。
+- `m55-restart` 场景：保留控制区、复位诊断、SRAM 计时函数、REPARK 服务及可执行服务入口满足[重启契约](m55-restart.zh-CN.md)。
 
 审计结果写入 `release/offline-validation.json`。布局或关键启动代码变化时，需同步检查接口约定、审计规则及回归验证。离线审计不能代替实际启动、通信和持续运行的[实板测试](testing.zh-CN.md)。

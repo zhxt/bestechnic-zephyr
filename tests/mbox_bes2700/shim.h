@@ -42,6 +42,9 @@ static inline void k_spin_unlock(struct k_spinlock *lock, int key)
 static inline void barrier_dsync_fence_full(void) {}
 static void irq_enable(unsigned int irq);
 static void irq_disable(unsigned int irq);
+#ifdef CONFIG_BES2700_M55_RESTART
+static void NVIC_ClearPendingIRQ(unsigned int irq);
+#endif
 static void sys_write32(uint32_t value, uintptr_t addr);
 static uint32_t sys_read32(uintptr_t addr);
 

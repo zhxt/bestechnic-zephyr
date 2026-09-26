@@ -92,11 +92,8 @@ int main(void)
   finish(0,80); return 0;
  }
  const volatile struct dual_service *api=(void *)DUAL_SERVICE_ADDR;
- uint32_t fn=api->dispatch, code=fn&~1U;
- if (api->magic!=DUAL_SERVICE_MAGIC || api->layout!=DUAL_LAYOUT || !(fn&1) ||
-     !((code>=0x14000000 && code<0x14800000) || (code>=0x00500000 && code<0x00510000)) ||
-     api->itcm!=DUAL_ITCM || api->itcm_size!=0x40000 || api->dtcm!=DUAL_DTCM ||
-     api->dtcm_size!=0xa0000 || api->mailbox!=DUAL_MAILBOX) { finish(0,81); return 0; }
+ uint32_t fn=api->dispatch;
+ if (dual_service_validate(api)) { finish(0,81); return 0; }
  service=(void *)(uintptr_t)fn;
  int rc=dual_image_check(m55_payload,sizeof(m55_payload),M55_PAYLOAD_CRC);
  stage(1,rc); if (rc) { finish(0,82); return 0; }

@@ -54,7 +54,8 @@
 
 	m55_shared: memory@2015e100 {
 		compatible = "zephyr,memory-region";
-		reg = <0x2015e100 0x00001ee0>;
+		/* Heartbeat only; trace, doorbell and lifecycle have fixed slots. */
+		reg = <0x2015e100 0x00000080>;
 		zephyr,memory-region = "M55SHARED";
 	};
 

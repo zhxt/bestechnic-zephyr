@@ -18,3 +18,6 @@
 
 / { reserved-memory { db_diag: memory@2015e200 { reg = <0x2015e200 0x80>; }; }; };
 / { reserved-memory { msg_shared: memory@2015c000 { reg = <0x2015c000 0x2000>; }; }; };
+
+/* Last shared writer publishes quiescence before CPU reset. */
+/ { reserved-memory { lifecycle_control: memory@2015e280 { reg = <0x2015e280 0x80>; }; }; };

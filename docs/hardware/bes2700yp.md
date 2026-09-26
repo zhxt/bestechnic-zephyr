@@ -61,6 +61,7 @@ This section describes the current code and default dual-core application on `ma
 | System clock/tick | Zephyr Cortex-M SysTick; HAL configures startup clock | Both cores at 24 MHz, 1000 ticks/s; `CONFIG_TICKLESS_KERNEL=n`, `CONFIG_PM=n` | 24 MHz is a project setting, not peak chip frequency; no DVFS or Zephyr system PM |
 | FPU/MPU | [SoC configuration](../../bsp/soc/bestechnic/bes2700yp/Kconfig) declares capability; M55 has [MPU regions](../../bsp/soc/bestechnic/bes2700yp/mpu_regions.c) | Both apps set `CONFIG_FPU=n`, `CONFIG_ARM_MPU=n`, `CONFIG_HW_STACK_PROTECTION=n` | Enabling requires separate runtime validation |
 | Runtime memory | DTS/linker scripts specify layout; bootstrap initializes hardware | Uses [current layout](#runtime-memory-layout) | Boot and loading require matching HAL and layout |
+| M55 normal restart | Optional `m55-restart` profile retains RAM while BTH stops and restarts only M55 | Disabled in default profile; new candidate awaits hardware validation | Cooperative stop only; see [restart contract](../m55-restart.md) |
 
 Mailbox hardware channel 1 appears as logical Zephyr channel 0; channel 0 is reserved for the vendor loader. See the [binding](../../bsp/dts/bindings/mbox/bestechnic,bes2700-mbox.yaml). Shared-memory protocol moves and checks data; notification count is not message count.
 

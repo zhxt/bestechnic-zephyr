@@ -13,7 +13,18 @@
 #define RING(n) ((volatile struct bi_ring *)(BI_BASE+4096U*(n)))
 #define OUT RING(SIDE)
 #define IN RING(1-SIDE)
+#ifdef CONFIG_BES2700_M55_RESTART
+#include <bes2700_lifecycle.h>
+#define Q_TARGET BES_LIFECYCLE_TARGET
+static volatile uint32_t worker_idle;
+int q_idle(void) { __DMB();return worker_idle; }
+#ifdef CC_BTH
+K_SEM_DEFINE(q_stopped,0,1);
+int q_wait_idle(int milliseconds) { return k_sem_take(&q_stopped,K_MSEC(milliseconds)); }
+#endif
+#else
 #define Q_TARGET 10000U
+#endif
 K_SEM_DEFINE(q_received,0,1);
 #ifdef CC_BTH
 K_SEM_DEFINE(q_started,0,1);
@@ -308,17 +319,40 @@ static int exercise(void)
 static void worker(void *a,void *b,void *c)
 {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);
+#if defined(CONFIG_BES2700_M55_RESTART) && defined(CC_BTH)
+ for(;;) {
+#endif
 #ifdef CC_BTH
  k_sem_take(&q_started,K_FOREVER);
+#endif
+#ifdef CONFIG_BES2700_M55_RESTART
+ worker_idle=0;
 #endif
  int rc=exercise();
  if(rc) { own.error=rc;own.phase=Q_FAILED;(void)stats();publish();(void)notify(); }
  update_report(1,rc);
+#ifdef CONFIG_BES2700_M55_RESTART
+ (void)mbox_set_enabled(mailbox,0,false);
+ __DSB();worker_idle=1;__DMB();
+#ifdef CC_BTH
+ k_sem_give(&q_stopped);
+ }
+#endif
+#endif
 }
 K_THREAD_DEFINE(q_worker,4096,worker,NULL,NULL,NULL,5,0,0);
 #ifdef CC_BTH
 void q_prepare(uint32_t build,uint32_t session)
 {
+#ifdef CONFIG_BES2700_M55_RESTART
+ /* Caller has consumed q_stopped before later sessions. Worker is blocked. */
+ k_sem_reset(&q_received);
+ k_spinlock_key_t key=k_spin_lock(&report_lock);
+ report=(struct q_report){0};
+ k_spin_unlock(&report_lock,key);
+ own=(struct q_state){0};other=(struct q_state){0};
+ for(unsigned i=0;i<BI_DEPTH;i++) { sent_at[i]=0; }
+#endif
  volatile uint32_t *p=(void *)BI_BASE;
  for(unsigned i=0;i<BI_BYTES/4;i++) { p[i]=0; }
  bi_init(RING(0));bi_init(RING(1));

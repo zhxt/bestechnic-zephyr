@@ -27,7 +27,7 @@ M55 ELF
 
 ## Boot sequence
 
-The default validation application runs for a bounded period, after which BTH stops M55; see [validation profiles](testing.md#validation-profiles).
+The default validation application runs for a bounded period, after which BTH stops M55. The optional `m55-restart` profile restarts M55 ten times while BTH remains running; see [validation profiles](testing.md#validation-profiles) and the [restart contract](m55-restart.md).
 
 1. Bootstrap initializes BTH hardware, checks the BTH payload, copies it to its runtime memory, and verifies the copy.
 2. Bootstrap installs hardware service entry points, prepares interrupts and processor state, then transfers control to BTH Zephyr.
@@ -49,6 +49,7 @@ Only bootstrap links the HAL libraries. BTH and M55 Zephyr images do not link th
 | [apps/bes2700yp/m55](../apps/bes2700yp/m55) | M55 application and build configuration |
 | [bsp/](../bsp) | Board, SoC, DTS, and drivers |
 | [platforms/bes2700yp/boot/bootstrap](../platforms/bes2700yp/boot/bootstrap) | BTH boot handoff, services, and diagnostics |
+| [platforms/bes2700yp/lifecycle](../platforms/bes2700yp/lifecycle), [platforms/bes2700yp/resources.json](../platforms/bes2700yp/resources.json) | M55 restart manager and resource contract |
 | [platforms/bes2700yp/ipc](../platforms/bes2700yp/ipc), [include/bestechnic/bes2700yp](../include/bestechnic/bes2700yp) | IPC, public interfaces, and shared-memory layout |
 | [sysbuild/](../sysbuild), [scripts/](../scripts) | Multi-image build, packaging, audit, log analysis, and source archives |
 | [tests/](../tests) | Host regressions and build checks |
@@ -83,5 +84,6 @@ When producing the full image, [firmware.py](../scripts/firmware.py) invokes [la
 - Mailbox interrupt routing, DTS, IPC parameters, and `pair` agree.
 - Flash-initialization code and state occupy early RAM; critical functions are placed as expected.
 - `bth_crc32` and `bth_copy_bytes` machine-code hashes match [t2-machine-code.json](../platforms/bes2700yp/boot/t2-machine-code.json), and startup-path call counts match expectations.
+- For `m55-restart`, retained control memory, reset diagnostics, SRAM timer placement, REPARK service, and the executable service entry meet the [restart contract](m55-restart.md).
 
 Results go to `release/offline-validation.json`. Layout or critical startup changes require corresponding interface, audit, and regression updates. Offline checks cannot replace [hardware boot and IPC testing](testing.md#hardware-validation).

@@ -31,6 +31,12 @@ static bool outgoing;
 static bool completed;
 static bool rx_enabled;
 static bool reply_in_callback;
+#ifdef CONFIG_BES2700_M55_RESTART
+static unsigned cleared;
+static bool tx_enabled;
+static bool stuck_done;
+static void NVIC_ClearPendingIRQ(unsigned int irq) { assert(irq==TEST_RX_IRQ || irq==99);cleared++; }
+#endif
 static struct bes2700_mbox_data state;
 static void connect_test(const struct device *dev) { (void)dev; }
 static const struct bes2700_mbox_config config = {
@@ -40,16 +46,36 @@ static const struct bes2700_mbox_config config = {
  .endpoint_bth = false, .sys = SYS_ADDR, .bth = BTH_ADDR,
 #endif
  .rx_irq = TEST_RX_IRQ, .connect = connect_test,
+#ifdef CONFIG_BES2700_M55_RESTART
+ .tx_irq=99,
+#endif
 };
 static const struct device dev = {.config = &config, .data = &state};
 
-static void irq_enable(unsigned int irq) { assert(irq == TEST_RX_IRQ); rx_enabled = true; }
-static void irq_disable(unsigned int irq) { assert(irq == TEST_RX_IRQ); rx_enabled = false; }
+static void irq_enable(unsigned int irq) {
+#ifdef CONFIG_BES2700_M55_RESTART
+ if(irq==99) { tx_enabled=true;return; }
+#endif
+ assert(irq == TEST_RX_IRQ); rx_enabled = true;
+}
+static void irq_disable(unsigned int irq) {
+#ifdef CONFIG_BES2700_M55_RESTART
+ if(irq==99) { tx_enabled=false;return; }
+#endif
+ assert(irq == TEST_RX_IRQ); rx_enabled = false;
+}
 
 static uint32_t sys_read32(uintptr_t addr)
 {
+#ifdef CONFIG_BES2700_M55_RESTART
+ if(addr==BTH_ADDR) { return incoming?BTH_TX_IND:0; }
+#endif
 	if (addr == SYS_ADDR) {
-		return masks | (incoming && (masks & SYS_RX_MASK) ? SYS_RX_ACTIVE : 0U) |
+		return masks |
+#ifdef CONFIG_BES2700_M55_RESTART
+            (outgoing?SYS_TX_IND:0) | ((completed || stuck_done)?SYS_TX_DONE:0) |
+#endif
+            (incoming && (masks & SYS_RX_MASK) ? SYS_RX_ACTIVE : 0U) |
 			(completed && (masks & SYS_TX_MASK) ? SYS_TX_ACTIVE : 0U);
 	}
 	assert(addr == SYS_ADDR + 4U || addr == BTH_ADDR + 4U);
@@ -75,7 +101,12 @@ static void sys_write32(uint32_t value, uintptr_t addr)
 			if ((value & SYS_TX_IND) != 0U) { outgoing = false; }
 		}
 	} else {
-		assert(addr == BTH_ADDR + 4U && value == BTH_TX_IND);
+		assert(addr == BTH_ADDR + 4U);
+#ifdef CONFIG_BES2700_M55_RESTART
+        assert(value==BTH_TX_IND || value==(BTH_TX_IND|SYS_TX_DONE));
+#else
+        assert(value == BTH_TX_IND);
+#endif
 		incoming = false;
 	}
 }
@@ -160,5 +191,44 @@ int main(void)
 	completed = true;
 	tx_isr(&dev);
 	assert(state.stats.spurious == 1U && !state.busy);
+#ifdef CONFIG_BES2700_M55_RESTART
+ for(unsigned round=0;round<11;round++) {
+  incoming=completed=true;
+  assert(bes2700_send(&dev,0,NULL)==0);
+  assert(bes2700_send(&dev,0,NULL)==0);
+  unsigned old=cleared;
+  assert(bes2700_mbox_reset(&dev)==0 && cleared==old+2);
+  assert(!incoming && !outgoing && !completed && !rx_enabled && !tx_enabled);
+  assert(!state.busy && !state.pending && !state.callback && state.resetting);
+  assert(state.stats.requests==0 && state.stats.spurious==0);
+  assert(bes2700_send(&dev,0,NULL)==-EBUSY);
+  assert(bes2700_mbox_reset(&dev)==0); /* idempotent while held reset */
+  assert(bes2700_mbox_resume(&dev)==0 && tx_enabled);
+  assert(bes2700_register(&dev,0,receive,&callbacks)==0);
+  assert(bes2700_enable(&dev,0,true)==0);
+  assert(bes2700_send(&dev,0,NULL)==0);done();
+  assert(state.stats.requests==1 && state.stats.done==1);
+ }
+ /* Failed readback must leave both interrupts and transmission gated. */
+ stuck_done=true;
+ assert(bes2700_mbox_reset(&dev)==-EIO);
+ struct bes2700_mbox_raw raw;
+ bes2700_mbox_get_raw(&dev,&raw);
+ assert(raw.local==SYS_TX_DONE && raw.peer==0);
+ assert(bes2700_send(&dev,0,NULL)==-EBUSY);
+ assert(bes2700_enable(&dev,0,true)==-EBUSY);
+ assert(bes2700_mbox_resume(&dev)==-EIO);
+ assert(!rx_enabled && !tx_enabled && state.resetting);
+ stuck_done=false;
+ assert(bes2700_mbox_reset(&dev)==0);
+ /* New peer notification between clear and resume must survive. */
+ incoming=true;
+ unsigned before=callbacks;
+ assert(bes2700_mbox_resume(&dev)==0);
+ assert(bes2700_register(&dev,0,receive,&callbacks)==0);
+ assert(bes2700_enable(&dev,0,true)==0);
+ rx_isr(&dev);
+ assert(callbacks==before+1 && !incoming);
+#endif
 	return 0;
 }

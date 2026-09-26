@@ -9,7 +9,7 @@
     "directories": ["apps", "bsp", "include", "platforms", "sysbuild"]
   },
   "archive": {
-    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "README.md", "README.zh-CN.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.zh-CN.md", "CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md", ".gitignore", ".editorconfig", ".gitattributes", "requirements.txt", "scripts/project_files.json", "docs/getting-started.md", "docs/getting-started.zh-CN.md", "docs/architecture.md", "docs/architecture.zh-CN.md", "docs/testing.md", "docs/testing.zh-CN.md", "docs/hal.md", "docs/hal.zh-CN.md", "docs/hardware/bes2700yp.md", "docs/hardware/bes2700yp.zh-CN.md"],
+    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "README.md", "README.zh-CN.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.zh-CN.md", "CONTRIBUTING.md", "CONTRIBUTING.zh-CN.md", ".gitignore", ".editorconfig", ".gitattributes", "requirements.txt", "scripts/project_files.json", "docs/getting-started.md", "docs/getting-started.zh-CN.md", "docs/architecture.md", "docs/architecture.zh-CN.md", "docs/testing.md", "docs/testing.zh-CN.md", "docs/hal.md", "docs/hal.zh-CN.md", "docs/hardware/bes2700yp.md", "docs/hardware/bes2700yp.zh-CN.md", "docs/m55-restart.md", "docs/m55-restart.zh-CN.md"],
     "directories": ["apps", "bsp", "include", "platforms", "sysbuild", "scripts", "tests"]
   },
   "binary_fixtures": []

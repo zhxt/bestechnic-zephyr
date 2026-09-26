@@ -23,3 +23,7 @@ config DUAL_MSG_MODE
  int "Message validation: 1=sequential, 2=concurrent, 3=negative"
  range 1 3
  default 1
+
+config BES2700_M55_RESTART
+ bool "Validate RAM-retained M55 CPU restart"
+ default n

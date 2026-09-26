@@ -10,6 +10,9 @@
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/sys_io.h>
 #include <bes2700_mbox.h>
+#ifdef CONFIG_BES2700_M55_RESTART
+#include <cmsis_core.h>
+#endif
 
 /* Channel 1 fields from the BES2700 SYS/BTH CMU register maps. */
 #define IRQ_CLR_OFFSET 4U
@@ -30,6 +33,9 @@ struct bes2700_mbox_config {
 	uintptr_t sys;
 	uintptr_t bth;
 	unsigned int rx_irq;
+#ifdef CONFIG_BES2700_M55_RESTART
+	unsigned int tx_irq;
+#endif
 	void (*connect)(const struct device *dev);
 };
 
@@ -40,6 +46,10 @@ struct bes2700_mbox_data {
 	bool enabled;
 	bool busy;
 	bool pending;
+#ifdef CONFIG_BES2700_M55_RESTART
+	bool resetting;
+	bool reset_failed;
+#endif
 	struct bes2700_mbox_stats stats;
 };
 
@@ -87,6 +97,12 @@ static int bes2700_send(const struct device *dev, uint32_t channel,
 	}
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
+#ifdef CONFIG_BES2700_M55_RESTART
+	if (data->resetting) {
+		k_spin_unlock(&data->lock, key);
+		return -EBUSY;
+	}
+#endif
 	data->stats.requests++;
 	if (data->busy) {
 		data->pending = true;
@@ -171,6 +187,12 @@ static int bes2700_enable(const struct device *dev, uint32_t channel, bool enabl
 	}
 	k_spinlock_key_t key = k_spin_lock(&data->lock);
 
+#ifdef CONFIG_BES2700_M55_RESTART
+	if (enable && data->resetting) {
+		k_spin_unlock(&data->lock, key);
+		return -EBUSY;
+	}
+#endif
 	data->enabled = enable;
 	if (enable) {
 		/* Preserve a pending IND received while disabled. */
@@ -216,6 +238,51 @@ static int bes2700_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_BES2700_M55_RESTART
+int bes2700_mbox_reset(const struct device *dev)
+{
+ const struct bes2700_mbox_config *cfg=dev->config;
+ struct bes2700_mbox_data *data=dev->data;
+ k_spinlock_key_t key=k_spin_lock(&data->lock);
+ data->resetting=true;data->enabled=false;
+ irq_disable(cfg->rx_irq);irq_disable(cfg->tx_irq);
+ write_flush(rx_mask(cfg)|tx_mask(cfg),local(cfg)+IRQ_CLR_OFFSET);
+ /* Peer CPU is held reset. Both raw IND/DONE fields share bits 3/1. */
+ write_flush(SYS_TX_IND|SYS_TX_DONE,peer(cfg)+IRQ_CLR_OFFSET);
+ write_flush(SYS_TX_IND|SYS_TX_DONE,local(cfg)+IRQ_CLR_OFFSET);
+ NVIC_ClearPendingIRQ(cfg->rx_irq);NVIC_ClearPendingIRQ(cfg->tx_irq);
+ uint32_t raw=sys_read32(local(cfg))|sys_read32(peer(cfg));
+ data->reset_failed=(raw&(SYS_TX_IND|SYS_TX_DONE))!=0;
+ data->busy=false;data->pending=false;
+ data->stats=(struct bes2700_mbox_stats){0};
+ data->callback=NULL;data->user_data=NULL;
+ int rc=data->reset_failed ? -EIO:0;
+ k_spin_unlock(&data->lock,key);
+ return rc;
+}
+int bes2700_mbox_resume(const struct device *dev)
+{
+ const struct bes2700_mbox_config *cfg=dev->config;
+ struct bes2700_mbox_data *data=dev->data;
+ k_spinlock_key_t key=k_spin_lock(&data->lock);
+ if(data->reset_failed) { k_spin_unlock(&data->lock,key);return -EIO; }
+ data->resetting=false;
+ write_flush(tx_mask(cfg),local(cfg));irq_enable(cfg->tx_irq);
+ k_spin_unlock(&data->lock,key);return 0;
+}
+
+void bes2700_mbox_get_raw(const struct device *dev, struct bes2700_mbox_raw *out)
+{
+	const struct bes2700_mbox_config *cfg = dev->config;
+	struct bes2700_mbox_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+	out->local = sys_read32(local(cfg));
+	out->peer = sys_read32(peer(cfg));
+	k_spin_unlock(&data->lock, key);
+}
+#endif
+
 static DEVICE_API(mbox, bes2700_api) = {
 	.send = bes2700_send,
 	.register_callback = bes2700_register,
@@ -241,10 +308,16 @@ static DEVICE_API(mbox, bes2700_api) = {
 		.sys = DT_INST_REG_ADDR_BY_NAME(inst, sys),                               \
 		.bth = DT_INST_REG_ADDR_BY_NAME(inst, bth),                               \
 		.rx_irq = DT_INST_IRQ_BY_NAME(inst, rx, irq),                             \
+		BES2700_RESTART_CONFIG(inst)                                            \
 		.connect = connect_##inst,                                                \
 	};                                                                               \
 	static struct bes2700_mbox_data data_##inst;                                      \
 	DEVICE_DT_INST_DEFINE(inst, bes2700_init, NULL, &data_##inst, &config_##inst,       \
 			      PRE_KERNEL_1, CONFIG_MBOX_INIT_PRIORITY, &bes2700_api);
 
+#ifdef CONFIG_BES2700_M55_RESTART
+#define BES2700_RESTART_CONFIG(inst) .tx_irq = DT_INST_IRQ_BY_NAME(inst, tx_done, irq),
+#else
+#define BES2700_RESTART_CONFIG(inst)
+#endif
 DT_INST_FOREACH_STATUS_OKAY(BES2700_DEFINE)

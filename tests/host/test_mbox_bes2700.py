@@ -25,6 +25,12 @@ class MboxDriverTests(unittest.TestCase):
     def test_actual_driver_with_register_model(self):
         self.run_model([])
 
+    def test_bth_restart_and_failed_clear(self):
+        self.run_model(["-DTEST_BTH=1", "-DCONFIG_BES2700_M55_RESTART=1"])
+
+    def test_m55_restart_and_failed_clear(self):
+        self.run_model(["-DCONFIG_BES2700_M55_RESTART=1"])
+
     def run_model(self, options):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -34,6 +40,7 @@ class MboxDriverTests(unittest.TestCase):
                 header.parent.mkdir(parents=True, exist_ok=True)
                 header.write_text('#include "shim.h"\n')
             executable = root / "test_driver"
+            (root / "cmsis_core.h").write_text('#include "shim.h"\n')
             subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                             "-fsanitize=undefined", *options, "-I", str(root),
                             "-I", str(PORT / "tests/mbox_bes2700"),

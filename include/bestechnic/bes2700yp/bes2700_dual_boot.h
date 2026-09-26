@@ -2,7 +2,12 @@
 #ifndef BES2700_DUAL_BOOT_H
 #define BES2700_DUAL_BOOT_H
 #include <stdint.h>
+#if defined(CONFIG_BES2700_M55_RESTART) || defined(BES_BTH_M55_RESTART)
+#include "bes2700_lifecycle.h"
+#define DUAL_LAYOUT BES_LIFECYCLE_LAYOUT
+#else
 #define DUAL_LAYOUT 0x00080002U
+#endif
 #define DUAL_SERVICE_ADDR 0x2055c100U
 #define DUAL_SERVICE_MAGIC 0x38565342U
 #define DUAL_SHARED_ADDR 0x2015e100U
@@ -37,6 +42,23 @@ struct dual_hw {
 struct dual_service {
  uint32_t magic, layout, dispatch, itcm, itcm_size, dtcm, dtcm_size, mailbox;
 };
+_Static_assert(sizeof(struct dual_service) == 32, "service ABI size");
+/* Service code uses FLASHX, not the 0x34000000 flash data/load alias. */
+#define DUAL_SERVICE_FLASHX_START 0x14000000U
+#define DUAL_SERVICE_FLASHX_END 0x14800000U
+#define DUAL_SERVICE_SRAM_START 0x00500000U
+#define DUAL_SERVICE_SRAM_END 0x00510000U
+enum dual_service_error {
+	DUAL_SERVICE_BAD_MAGIC = 1U << 0,
+	DUAL_SERVICE_BAD_LAYOUT = 1U << 1,
+	DUAL_SERVICE_BAD_THUMB = 1U << 2,
+	DUAL_SERVICE_BAD_EXEC = 1U << 3,
+	DUAL_SERVICE_BAD_ITCM = 1U << 4,
+	DUAL_SERVICE_BAD_DTCM = 1U << 5,
+	DUAL_SERVICE_BAD_MAILBOX = 1U << 6,
+};
+/* Shared by BTH applications and the final ELF audit's host-compiled check. */
+uint32_t dual_service_validate(const volatile struct dual_service *service);
 /* Single M55 writer; odd seq means in progress, even seq publishes a snapshot. */
 struct dual_status {
  uint32_t seq, magic, layout, build, stage, beat, ms, cycles;

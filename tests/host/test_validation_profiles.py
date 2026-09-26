@@ -8,7 +8,7 @@ import unittest
 from analyze_dual_message import analyze
 from project_files import select_files
 from test_message_parser import fixture, manifest
-from validation_profiles import get_profile, validate_identity, validate_manifest
+from validation_profiles import cmake_settings, get_profile, validate_identity, validate_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -89,3 +89,15 @@ class ValidationProfiles(unittest.TestCase):
     def test_profile_module_is_a_build_and_source_input(self):
         for scope in ('build', 'archive'):
             self.assertIn('scripts/validation_profiles.py', select_files(ROOT, scope))
+
+    def test_restart_parameters_and_analyzer_separation(self):
+        from test_restart_parser import manifest as restart_manifest
+        from analyze_dual_restart import analyze as analyze_restart
+        restart = get_profile('m55-restart')
+        self.assertEqual((restart.mode, restart.seconds, restart.heartbeat), (1, 600, 600))
+        self.assertTrue(restart.m55_restart)
+        self.assertEqual(validate_manifest(restart_manifest(), restart=True), restart)
+        self.assertEqual(analyze('', restart_manifest())['status'], 'fail')
+        self.assertEqual(analyze_restart('', manifest())['status'], 'fail')
+        self.assertIn('set(BES_VALIDATION_M55_RESTART ON)', cmake_settings('m55-restart'))
+        self.assertIn('set(BES_VALIDATION_M55_RESTART OFF)', cmake_settings('ipc-backpressure'))

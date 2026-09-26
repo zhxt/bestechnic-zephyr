@@ -49,7 +49,7 @@ To also build all validation profiles:
 
 ## Validation profiles
 
-`BES_VALIDATION_PROFILE` selects test parameters for the current IPC validation app, not a source revision. [validation_profiles.py](../scripts/validation_profiles.py) defines them; [firmware.py](../scripts/firmware.py) generates both core configurations.
+`BES_VALIDATION_PROFILE` selects validation behavior, not a source revision. [validation_profiles.py](../scripts/validation_profiles.py) defines the profiles; [firmware.py](../scripts/firmware.py) generates both core configurations. The four message profiles share the original IPC ABI. `m55-restart` uses a separate retained-memory lifecycle contract.
 
 The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 seconds. BTH observes until 610 seconds, ends validation, and stops M55. This bounded behavior is specific to the validation app; production applications should set their own lifetime.
 
@@ -61,8 +61,11 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 | `ipc-backpressure` | Continuous bidirectional traffic for 600 s, including slow consumers and counter closure | 610 s |
 | `ipc-fault-injection` | Fault injection on both cores, detection, and normal traffic before/after | 600 s |
 | `ipc-backpressure-1h` | Continuous bidirectional traffic for 3,600 s and final counter closure | 3,610 s |
+| `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | 600 s |
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
+
+For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and at least 601 BTH heartbeat samples. The profile is a new hardware candidate; host and build passes do not establish that it works on the board.
 
 For example, build fault injection in its own directory:
 
@@ -110,7 +113,7 @@ BTH normally reports both cores. A trailing `pass` line alone is insufficient; t
 
 ### Analyze results
 
-The packaged `analyze_dual_message.py` checks boot, timing, heartbeats, and messages together. Keep the full package because it imports companion analyzers; use the versions matching the flashed image:
+For the four message profiles, the packaged `analyze_dual_message.py` checks boot, timing, heartbeats, and messages together. For `m55-restart`, use packaged `analyze_dual_restart.py` with the same `--manifest` and `--output` arguments. Keep the full package because analyzers import companion files; use the versions matching the flashed image:
 
 ```sh
 .venv/bin/python "$BES_TEST_DIR/release/analyze_dual_message.py" \
@@ -129,7 +132,7 @@ Here `--manifest` takes **`layout.json`**, not `manifest.json`. It checks BTH/M5
 
 Top-level `status` describes only the last boot session. Inspect `session_count` and every session's `status`, `errors`, and `missing`; a later pass cannot erase an earlier failure. Save each run separately. A one-run report should have one passing session with empty `errors` and `missing`; review any timing warnings.
 
-For a formal candidate, build and test all four profiles on hardware. Save at least one complete independent run for `ipc-sequential`, `ipc-fault-injection`, and `ipc-backpressure-1h`, and three for `ipc-backpressure`. Sequential testing checks 10,000 messages each way and later heartbeats; fault injection checks detection and recovery; the one-hour profile checks full duration and final counters. Use `run-01`, `run-02`, and so on, analyzing each against its own `layout.json`. A parser cannot prove a power cycle: cold-boot claims also need an operation record. New firmware identity requires appropriate retesting.
+For a formal message candidate, build and test all four message profiles on hardware. Save at least one complete independent run for `ipc-sequential`, `ipc-fault-injection`, and `ipc-backpressure-1h`, and three for `ipc-backpressure`. Sequential testing checks 10,000 messages each way and later heartbeats; fault injection checks detection and recovery; the one-hour profile checks full duration and final counters. The restart candidate needs three complete runs with independent physical power cycles, following the [restart contract](m55-restart.md). Use `run-01`, `run-02`, and so on, analyzing each against its own `layout.json`. A parser cannot prove a power cycle: cold-boot claims also need an operation record. New firmware identity requires appropriate retesting. Earlier message-profile evidence belongs to its own image and does not validate changed bytes.
 
 ### Evidence records
 

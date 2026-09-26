@@ -14,7 +14,8 @@ import tempfile
 import zlib
 from pathlib import Path
 
-from audit_dual import audit_doorbell, audit_m55
+from audit_dual import (audit_doorbell, audit_m55, check_resource_contract,
+                        audit_lifecycle, audit_service_entry, audit_reset_timer, audit_repark)
 from check_bth_layout import audit, symbols
 from pack_bth_payload import pack
 from pack_m55_payload import parse_entry, parse_load_segments, run_readelf
@@ -57,6 +58,7 @@ def configure(a):
         raise ValueError('compiler differs from the audited HAL producer toolchain')
     scenario = get_profile(a.profile)
     duration, mode = scenario.seconds, scenario.mode
+    resources = check_resource_contract(ROOT)
     hal_inputs = {name: sha(path) for name, path in hal_files(a.hal).items()}
     if sha(a.hal / 'manifest.json') != (ROOT / 'hal-release.sha256').read_text().strip():
         raise ValueError('HAL manifest.json SHA256 differs from hal-release.sha256')
@@ -66,6 +68,10 @@ def configure(a):
                     duration=duration, heartbeat=scenario.heartbeat,
                     sources=sources, hal_release=sha(a.hal / 'manifest.json'),
                     modules=modules, compiler=compiler)
+    if scenario.m55_restart:
+        identity['lifecycle'] = resources['lifecycle']
+        identity['reset_diagnostic'] = resources['reset_diagnostic']
+        identity['repark_diagnostic'] = resources['repark_diagnostic']
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     identity['source_sha256'] = digest
     for name in ('m55_build', 'pair', 'profile'):
@@ -79,6 +85,7 @@ def configure(a):
     common = (f'CONFIG_DUAL_CC_PAIR=0x{identity["pair"]:08x}\n'
               f'CONFIG_DUAL_M55_BUILD=0x{identity["m55_build"]:08x}\n'
               f'CONFIG_DUAL_MSG_MODE={mode}\nCONFIG_DUAL_IPC_SECONDS={duration}\n')
+    common += 'CONFIG_BES2700_M55_RESTART=' + ('y' if scenario.m55_restart else 'n') + '\n'
     write(a.generated / 'm55.conf', common)
     write(a.generated / 'bth.conf', common + f'CONFIG_DUAL_DURATION_SECONDS={identity["heartbeat"]}\n')
     write(a.generated / 'boot_profile_id.h',
@@ -213,7 +220,8 @@ def final(a):
     report = audit(a.elf, belf, candidate, generated / 'bth.payload.bin', layout, a.cross)
     report['m55_memory'] = audit_m55(melf, a.cross)
     report['doorbell_endpoints'] = {core: audit_doorbell(elf, a.cross, core == 'bth',
-                                  identity['duration'], identity['mode'])
+                                  identity['duration'], identity['mode'],
+                                  get_profile(identity['validation_profile']).m55_restart)
                                    for core, elf in [('bth', belf), ('m55', melf)]}
     mpayload = (generated / 'm55.segment.bin').read_bytes()
     if mpayload not in (generated / 'bth.payload.bin').read_bytes():
@@ -248,6 +256,11 @@ def final(a):
             raise ValueError('message DTS reservation')
     if any(re.match(r'hal_sys2bth_.*(?:open|start_recv|irq_init)', name) for name in syms):
         raise ValueError('vendor IPC owner linked')
+    resources = check_resource_contract(ROOT)
+    report['resource_contract'] = resources
+    report['lifecycle_memory'] = audit_lifecycle((belf, melf, a.elf), a.cross, resources)
+    report['service_entry'] = audit_service_entry(a.elf, belf, a.cross, ROOT, generated,
+                                                  get_profile(identity['validation_profile']).m55_restart)
     layout.update(version='V08c_QMSG_T2', build_architecture='bestechnic-zephyr-v1', test=8,
         log_version=3, prefix_version=1, duration_seconds=identity['heartbeat'],
         log_clock_state=[0x2055c180,0x2055c1a0], m55_build=f'0x{identity["m55_build"]:08x}',
@@ -260,6 +273,14 @@ def final(a):
         profile_id=f'0x{identity["profile"]:08x}', profile_points=12, profile_sampler=syms['bootprof_mark'] | 1,
         profile_buffer=0x2055c200, profile_size=1136, profile_crc_address=syms['bth_crc32'],
         profile_copy_address=syms['bth_copy_bytes'])
+    if get_profile(identity['validation_profile']).m55_restart:
+        report['reset_timer'] = audit_reset_timer(a.elf, a.cross, resources)
+        report['repark'] = audit_repark(a.elf, a.cross)
+        layout.update(version='M55_RESTART_V4_T2', dual_layout='0x000a0004',
+                      restart_version=4, restart_rounds=11, restart_target=1000,
+                      lifecycle=identity['lifecycle'], reset_diagnostic=identity['reset_diagnostic'],
+                      reset_sampler=report['reset_timer']['sampler'],
+                      repark_diagnostic=identity['repark_diagnostic'])
     save(build / 'layout.json', layout)
     save(build / 'offline-validation.json', report)
     manifest = dict(identity, version='bestechnic-zephyr-v1', offline='pass', hardware='not_tested',

@@ -71,6 +71,7 @@ export ZEPHYR_BASE="$PWD/zephyr"
 - [环境准备与构建](docs/getting-started.zh-CN.md)
 - [BES2700YP 硬件与支持范围](docs/hardware/bes2700yp.zh-CN.md)
 - [测试与发布验证](docs/testing.zh-CN.md)
+- [M55 正常重启验证](docs/m55-restart.zh-CN.md)
 - [架构与代码归属](docs/architecture.zh-CN.md)
 - [Bestechnic HAL 模块](docs/hal.zh-CN.md)
 - [贡献指南](CONTRIBUTING.zh-CN.md)

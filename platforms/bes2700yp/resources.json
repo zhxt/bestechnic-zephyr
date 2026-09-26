@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "chip": "bes2700yp",
+  "scope": "dual-core lifecycle; cache disabled; RAM retained",
+  "lifecycle": {
+    "layout": 655364,
+    "address": 538305152,
+    "bytes": 128,
+    "rounds": 11,
+    "target": 1000,
+    "observe_seconds": 600,
+    "ready_ms": 5000,
+    "message_ms": 30000,
+    "quiesce_ms": 5000,
+    "reset_ms": 10
+  },
+  "reset_diagnostic": {
+    "version": 1,
+    "address": 542491040,
+    "bytes": 80,
+    "read_attempts": 32,
+    "poll_limit": 1024
+  },
+  "repark_diagnostic": {
+    "version": 1,
+    "address": 542492672,
+    "bytes": 100,
+    "bank": 9,
+    "selector_mask": 939524096,
+    "physical_words": [540147712, 540147716, 540213248],
+    "expected_words": [538312672, 537657353, 3892166448]
+  },
+  "regions": [
+    {
+      "name": "message",
+      "start": 538296320,
+      "end": 538304512,
+      "owner": "per-core fields; BTH reinitializes after quiescence"
+    },
+    {
+      "name": "trampoline",
+      "start": 538304512,
+      "end": 538304768,
+      "owner": "BTH loader"
+    },
+    {
+      "name": "heartbeat",
+      "start": 538304768,
+      "end": 538304896,
+      "owner": "M55"
+    },
+    {
+      "name": "trace",
+      "start": 538304896,
+      "end": 538305024,
+      "owner": "M55"
+    },
+    {
+      "name": "doorbell",
+      "start": 538305024,
+      "end": 538305152,
+      "owner": "M55 diagnostic"
+    },
+    {
+      "name": "lifecycle",
+      "start": 538305152,
+      "end": 538305280,
+      "owner": "BTH first 64 bytes; M55 last 64 bytes"
+    },
+    {
+      "name": "unallocated",
+      "start": 538305280,
+      "end": 538312672,
+      "owner": "reserved"
+    },
+    {
+      "name": "mailbox",
+      "start": 538312672,
+      "end": 538312704,
+      "owner": "boot contract"
+    }
+  ],
+  "owners": {
+    "shared_clock_power_reset": "BTH manager through bootstrap HAL",
+    "bth_timer_uart": "BTH",
+    "m55_systick_nvic": "M55",
+    "mailbox_channel_1": "each endpoint; BTH resets both only with peer CPU held",
+    "mailbox_channel_0": "reserved; not touched by lifecycle"
+  }
+}

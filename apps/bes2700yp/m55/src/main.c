@@ -3,6 +3,9 @@
 #include <cmsis_core.h>
 #include <bes2700_dual_boot.h>
 #include <bes2700_dual_trace.h>
+#ifdef CONFIG_BES2700_M55_RESTART
+#include <bes2700_lifecycle.h>
+#endif
 __attribute__((section(".bes2700_m55_shared"))) volatile struct dual_status dual_shared;
 static volatile uint32_t initialized_probe = 0x5aa55aa5;
 static volatile uint32_t zero_probe;
@@ -43,6 +46,11 @@ int main(void)
  __DMB(); dual_shared.magic = DUAL_MAGIC;
  int64_t deadline = k_uptime_get();
  for (;;) {
+#ifdef CONFIG_BES2700_M55_RESTART
+  if (bes2700_lifecycle_peer_poll()) {
+   publish(255,10,0,k_uptime_get_32());return 0;
+  }
+#endif
   size_t free = 0;
   uint32_t error = initialized_probe != 0x5aa55aa5 || zero_probe ? 1 : 0;
   if (k_thread_stack_space_get(k_current_get(), &free) || free < 128) { error = 2; }
