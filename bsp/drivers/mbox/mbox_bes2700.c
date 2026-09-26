@@ -239,6 +239,18 @@ static int bes2700_init(const struct device *dev)
 }
 
 #ifdef CONFIG_BES2700_M55_RESTART
+int bes2700_mbox_suspend(const struct device *dev)
+{
+ const struct bes2700_mbox_config *cfg=dev->config;
+ struct bes2700_mbox_data *data=dev->data;
+ k_spinlock_key_t key=k_spin_lock(&data->lock);
+ data->resetting=true;data->enabled=false;
+ irq_disable(cfg->rx_irq);irq_disable(cfg->tx_irq);
+ write_flush(rx_mask(cfg)|tx_mask(cfg),local(cfg)+IRQ_CLR_OFFSET);
+ k_spin_unlock(&data->lock,key);
+ return 0;
+}
+
 int bes2700_mbox_reset(const struct device *dev)
 {
  const struct bes2700_mbox_config *cfg=dev->config;

@@ -30,6 +30,9 @@ K_SEM_DEFINE(q_received,0,1);
 K_SEM_DEFINE(q_started,0,1);
 static struct k_spinlock report_lock;
 static struct q_report report;
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+static bool isolated;
+#endif
 #endif
 static const struct device *const mailbox=DEVICE_DT_GET(DT_NODELABEL(mbox_peer));
 static struct q_state own, other;
@@ -344,6 +347,9 @@ K_THREAD_DEFINE(q_worker,4096,worker,NULL,NULL,NULL,5,0,0);
 #ifdef CC_BTH
 void q_prepare(uint32_t build,uint32_t session)
 {
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+ if(isolated) { return; }
+#endif
 #ifdef CONFIG_BES2700_M55_RESTART
  /* Caller has consumed q_stopped before later sessions. Worker is blocked. */
  k_sem_reset(&q_received);
@@ -360,7 +366,29 @@ void q_prepare(uint32_t build,uint32_t session)
   .pair=CONFIG_DUAL_CC_PAIR,.build=build,.session=session?session:1,.phase=Q_READY,.guard=Q_META_GUARD};
  __DSB();
 }
-void q_start(void) { k_sem_give(&q_started); }
+void q_start(void)
+{
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+ if(isolated) { return; }
+#endif
+ k_sem_give(&q_started);
+}
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+/* UP only: abort returns after the worker can no longer access shared RAM.
+ * This worker owns no mutexes or allocated resources. IRQs are masked first;
+ * its callback only posts q_received, and cannot outlive this UP call. */
+#ifdef CONFIG_SMP
+#error "Terminal worker isolation requires a uniprocessor Zephyr image"
+#endif
+int q_isolate(void)
+{
+ isolated=true;
+ int rc=bes2700_mbox_suspend(mailbox);
+ k_thread_abort(q_worker);
+ __DSB();worker_idle=1;__DMB();
+ return rc;
+}
+#endif
 void q_stop(void) { k_thread_abort(q_worker);(void)mbox_set_enabled(mailbox,0,false); }
 void q_snapshot(struct q_report *out)
 { k_spinlock_key_t key=k_spin_lock(&report_lock);*out=report;k_spin_unlock(&report_lock,key); }

@@ -61,11 +61,13 @@ This section describes the current code and default dual-core application on `ma
 | System clock/tick | Zephyr Cortex-M SysTick; HAL configures startup clock | Both cores at 24 MHz, 1000 ticks/s; `CONFIG_TICKLESS_KERNEL=n`, `CONFIG_PM=n` | 24 MHz is a project setting, not peak chip frequency; no DVFS or Zephyr system PM |
 | FPU/MPU | [SoC configuration](../../bsp/soc/bestechnic/bes2700yp/Kconfig) declares capability; M55 has [MPU regions](../../bsp/soc/bestechnic/bes2700yp/mpu_regions.c) | Both apps set `CONFIG_FPU=n`, `CONFIG_ARM_MPU=n`, `CONFIG_HW_STACK_PROTECTION=n` | Enabling requires separate runtime validation |
 | Runtime memory | DTS/linker scripts specify layout; bootstrap initializes hardware | Uses [current layout](#runtime-memory-layout) | Boot and loading require matching HAL and layout |
-| M55 normal restart | Optional `m55-restart` profile retains RAM while BTH stops and restarts only M55 | Disabled in default profile; new candidate awaits hardware validation | Cooperative stop only; see [restart contract](../m55-restart.md) |
+| M55 normal restart | Optional `m55-restart` profile retains RAM while BTH stops and restarts only M55 | Disabled in default profile; hardware evidence is recorded per image | Cooperative stop only; see [restart contract](../m55-restart.md) |
 
 Mailbox hardware channel 1 appears as logical Zephyr channel 0; channel 0 is reserved for the vendor loader. See the [binding](../../bsp/dts/bindings/mbox/bestechnic,bes2700-mbox.yaml). Shared-memory protocol moves and checks data; notification count is not message count.
 
 The UART driver supports BTH only. BTH's UART device node and Zephyr Serial/Console are disabled by default on both cores. Seeing logs does not mean that driver or Console is enabled; see [serial and logging](#serial-and-logging).
+
+Optional M55 fault isolation profiles are described in the [isolation contract](../m55-restart.md#fault-isolation-profiles). They are disabled by default and do not reload M55. Hardware results belong to each image report.
 
 ### Resources not integrated
 

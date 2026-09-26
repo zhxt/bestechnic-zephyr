@@ -30,3 +30,11 @@ config DUAL_MSG_MODE
 config BES2700_M55_RESTART
  bool "Validate RAM-retained M55 CPU restart"
  default n
+
+config BES2700_M55_FAULT_CASE
+ int "M55 fault injection: 0=off, 1=before READY, 2=heartbeat stop"
+ range 0 2
+ default 0
+ help
+   Validation only. Nonzero values require the retained-RAM lifecycle.
+   The M55 CPU deliberately stops with interrupts disabled.

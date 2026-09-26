@@ -6,7 +6,8 @@ target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700y
 zephyr_get(DUAL_GENERATED_DIR SYSBUILD)
 if(CONFIG_BES2700_M55_RESTART)
   target_sources(app PRIVATE src/restart.c
-    ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/lifecycle/manager.c)
+    ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/lifecycle/manager.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/lifecycle/health.c)
 else()
   target_sources(app PRIVATE src/main.c)
 endif()

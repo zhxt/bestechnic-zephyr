@@ -26,6 +26,9 @@ struct bes2700_mbox_raw {
 
 /* Read-only failure evidence; remote state can change while the peer runs. */
 void bes2700_mbox_get_raw(const struct device *dev, struct bes2700_mbox_raw *out);
+/* Block local sends and both IRQs without clearing peer-owned state.
+ * Safe before remote reset. Caller stops local workers before reset/clear. */
+int bes2700_mbox_suspend(const struct device *dev);
 /* Caller owns all local users and holds the remote CPU in reset. Not RX disable. */
 int bes2700_mbox_reset(const struct device *dev);
 int bes2700_mbox_resume(const struct device *dev);

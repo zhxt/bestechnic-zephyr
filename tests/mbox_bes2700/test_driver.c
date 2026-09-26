@@ -197,6 +197,18 @@ int main(void)
   assert(bes2700_send(&dev,0,NULL)==0);
   assert(bes2700_send(&dev,0,NULL)==0);
   unsigned old=cleared;
+  /* A live/failed peer may still own shared RAM and raw IRQ state. Suspend
+   * must gate local access without clearing either endpoint's evidence. */
+  bool saved_incoming=incoming,saved_outgoing=outgoing,saved_completed=completed;
+  struct bes2700_mbox_stats saved_stats=state.stats;
+  assert(bes2700_mbox_suspend(&dev)==0);
+  assert(!rx_enabled && !tx_enabled && state.resetting && !state.enabled);
+  assert(cleared==old && incoming==saved_incoming && outgoing==saved_outgoing &&
+         completed==saved_completed);
+  assert(state.stats.requests==saved_stats.requests && state.busy && state.pending);
+  assert(bes2700_send(&dev,0,NULL)==-EBUSY);
+  assert(bes2700_enable(&dev,0,true)==-EBUSY);
+  assert(bes2700_mbox_suspend(&dev)==0 && cleared==old);
   assert(bes2700_mbox_reset(&dev)==0 && cleared==old+2);
   assert(!incoming && !outgoing && !completed && !rx_enabled && !tx_enabled);
   assert(!state.busy && !state.pending && !state.callback && state.resetting);

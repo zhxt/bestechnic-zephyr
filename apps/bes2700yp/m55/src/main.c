@@ -5,6 +5,7 @@
 #include <bes2700_dual_trace.h>
 #ifdef CONFIG_BES2700_M55_RESTART
 #include <bes2700_lifecycle.h>
+#include <bes2700_peer_health.h>
 #endif
 __attribute__((section(".bes2700_m55_shared"))) volatile struct dual_status dual_shared;
 static volatile uint32_t initialized_probe = 0x5aa55aa5;
@@ -38,18 +39,35 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
  __DMB(); dual_shared.seq++; __DSB();
  __disable_irq(); for (;;) { __NOP(); }
 }
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+#if !defined(CONFIG_BES2700_M55_RESTART)
+#error "M55 fault injection requires lifecycle support"
+#endif
+static void inject_fault(void)
+{
+ __disable_irq();
+ dual_trace_record(BES_PEER_INJECTION_STAGE,CONFIG_BES2700_M55_FAULT_CASE);
+ for (;;) { __NOP(); }
+}
+#endif
 int main(void)
 {
  dual_trace_record(4, 0);
  dual_shared.magic = 0; dual_shared.seq = 0; dual_shared.beat = 0;
  dual_shared.layout = DUAL_LAYOUT; dual_shared.build = CONFIG_DUAL_M55_BUILD;
  __DMB(); dual_shared.magic = DUAL_MAGIC;
+#if CONFIG_BES2700_M55_FAULT_CASE == 1
+ inject_fault();
+#endif
  int64_t deadline = k_uptime_get();
  for (;;) {
 #ifdef CONFIG_BES2700_M55_RESTART
   if (bes2700_lifecycle_peer_poll()) {
    publish(255,10,0,k_uptime_get_32());return 0;
   }
+#endif
+#if CONFIG_BES2700_M55_FAULT_CASE == 2
+  if (dual_shared.beat >= BES_PEER_INJECTION_BEATS) { inject_fault(); }
 #endif
   size_t free = 0;
   uint32_t error = initialized_probe != 0x5aa55aa5 || zero_probe ? 1 : 0;

@@ -13,6 +13,7 @@ class ValidationProfile:
     seconds: int
     heartbeat: int
     m55_restart: bool = False
+    fault_case: int = 0
 
 
 PROFILES = MappingProxyType({
@@ -21,6 +22,8 @@ PROFILES = MappingProxyType({
     'ipc-fault-injection': ValidationProfile(3, 600, 600),
     'ipc-backpressure-1h': ValidationProfile(2, 3600, 3610),
     'm55-restart': ValidationProfile(1, 600, 600, True),
+    'm55-ready-timeout': ValidationProfile(1, 600, 600, True, 1),
+    'm55-heartbeat-stop': ValidationProfile(1, 600, 600, True, 2),
 })
 
 
@@ -47,13 +50,13 @@ def validate_identity(identity):
     return scenario
 
 
-def validate_manifest(manifest, *, restart=False):
+def validate_manifest(manifest, *, restart=False, isolation=False):
     scenario = get_profile(manifest.get('validation_profile'))
     _check_fields(manifest, dict(validation_schema=VALIDATION_SCHEMA,
                                 message_mode=scenario.mode,
                                 message_seconds=scenario.seconds,
                                 duration_seconds=scenario.heartbeat))
-    if scenario.m55_restart != restart:
+    if scenario.m55_restart != restart or bool(scenario.fault_case) != isolation:
         raise ValueError('Validation profile requires a different analyzer')
     return scenario
 

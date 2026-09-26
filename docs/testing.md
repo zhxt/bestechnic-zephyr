@@ -36,7 +36,7 @@ Use the default `main` build in [build instructions](getting-started.md#build) a
   --workspace . --output build/ci-host
 ```
 
-To also build all validation profiles:
+To also build the four message profiles:
 
 ```sh
 .venv/bin/python bestechnic-zephyr/scripts/ci.py \
@@ -62,10 +62,12 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 | `ipc-fault-injection` | Fault injection on both cores, detection, and normal traffic before/after | 600 s |
 | `ipc-backpressure-1h` | Continuous bidirectional traffic for 3,600 s and final counter closure | 3,610 s |
 | `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | 600 s |
+| `m55-ready-timeout` | Halt M55 before READY; detect timeout and isolate it | 600 s |
+| `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | 600 s |
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
 
-For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and at least 601 BTH heartbeat samples. The profile is a new hardware candidate; host and build passes do not establish that it works on the board.
+For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and at least 601 BTH heartbeat samples. Hardware evidence belongs to the matching image and its separate validation report.
 
 For example, build fault injection in its own directory:
 
@@ -112,6 +114,8 @@ Continue only if every entry is `OK` and the command exits 0. The candidate dire
 BTH normally reports both cores. A trailing `pass` line alone is insufficient; the analyzer checks identity, timing, heartbeats, messages, and order. Read `duration_seconds` in the candidate's `layout.json` and capture through final dual-core results, including heartbeats after the message phase.
 
 ### Analyze results
+
+The two isolation profiles use packaged `analyze_dual_isolation.py`; see the [fault isolation contract](m55-restart.md#fault-isolation-profiles). They keep M55 held in reset and do not reload it.
 
 For the four message profiles, the packaged `analyze_dual_message.py` checks boot, timing, heartbeats, and messages together. For `m55-restart`, use packaged `analyze_dual_restart.py` with the same `--manifest` and `--output` arguments. Keep the full package because analyzers import companion files; use the versions matching the flashed image:
 

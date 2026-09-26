@@ -120,3 +120,41 @@ SEL0/SEL1 原值/AXI 值/恢复值、三个物理地址、预期值、实际读�
 selector 在 AXI 阶段改变，三个字及恢复结果逐项正确。缺失记录和旧 ABI 不能通过。
 集成主机模型在 CPU reset 时用内存保护禁止 DTCM 访问；producer 单独测试实际 HAL
 代码的物理地址、其他内容保持、映射失败恢复及 PRIMASK 保存。两类模型都不能替代实板。
+
+## 故障隔离场景
+
+`m55-ready-timeout` 和 `m55-heartbeat-stop` 验证 BTH 健康时对 M55 故障的最终隔离，
+沿用正常重启的保留 RAM 服务及固定时钟/cache 配置。sysbuild 命令使用
+`-DBES_VALIDATION_PROFILE=<场景名>` 选择；默认场景不注入 CPU 停止。
+
+前者让 M55 在发布 READY 前关闭中断并停止；后者在发布十次心跳后关闭中断并停止，
+不依赖业务消息是否已完成。BTH 使用本地时间，在等待 READY 达 5000 ms 或心跳
+连续 1000 ms 未推进时报告故障。快照读取有界，不可读的 seqlock 不刷新期限，
+迟到的心跳不能解除已锁存故障。可复用策略位于 `platforms/bes2700yp/lifecycle/health.c`。
+
+隔离先禁止本地 mailbox 新发送并屏蔽收发中断，保留对端通知状态，再终止本地 worker。
+这里限定当前单处理器 Zephyr 镜像：worker 不持有 mutex 或动态分配资源，回调只投递
+信号量。然后断言并读回确认 M55 CPU reset，最后清理硬件通道 1；任何一步失败都禁止
+后续步骤。无需对端 QUIESCE 确认，不在复位态读取 DTCM，不执行 REPARK、重新装载、
+业务重放或自动重试。CPU reset 不能证明其他总线主设备已停止，本场景不启用 DMA。
+
+隔离后 BTH 继续观察，累计从监测开始的 600 秒、601 条 sample；结束时再次确认
+M55 保持复位，通道 1 两端的原始通知/完成标志已清除。预期 reason 为 1（READY 超时）
+或 2（心跳停止）；意外故障或隔离失败即使 BTH 仍存活也不能通过验收。
+
+保留完整的匹配包，使用包内分析器：
+
+```sh
+python release/analyze_dual_isolation.py current_boot.cap \
+  --manifest release/layout.json --output analysis.json
+```
+
+分析器核对注入标记、检测时间、RELEASE/STOP 复位诊断、本地静止/复位保持/通道清理、
+完整 BTH 观察及 `isolation_result pass=1`，并要求 releases=1、recoveries=0。
+退出码 0/1/2 表示通过/失败/不完整，不能只看最后一行判定通过。里程碑验收时每场景
+保存三次独立物理断电上电记录，先检查首轮完整结果，再做重复测试。串口日志不能证明
+物理断电，操作方式需单独记录。主机测试覆盖期限、隔离各步失败、真实 worker 的终止门控、
+mailbox 寄存器模型及解析器负例，不能代替真实复位和总线时序验证。
+
+公共 worker、mailbox 或 bootstrap 变化仍需回归正常重启及四种消息场景。
+自动重载和其他故障类型另行扩展生命周期契约。

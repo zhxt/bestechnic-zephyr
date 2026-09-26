@@ -6,12 +6,17 @@
 #include <bes2700_dual_image.h>
 #include <bes2700_mbox.h>
 #include <bes2700_lifecycle.h>
+#include <bes2700_peer_health.h>
 #include "bth_contract.h"
 #include "m55_payload.h"
 #include "message.h"
+_Static_assert(BES_PEER_READY_MS==BES_LIFECYCLE_READY_MS,"READY budget contract");
 static const struct device *const mailbox=DEVICE_DT_GET(DT_NODELABEL(mbox_peer));
 static int (*service)(uint32_t,uint32_t);
 static uint32_t generation;
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+static uint32_t releases;
+#endif
 static struct dual_hw retained;
 static volatile uint32_t monitor_samples, monitor_error;
 static volatile uint32_t timer_count;
@@ -39,6 +44,9 @@ static int reset_call(unsigned round,uint32_t op,uint32_t failure)
  BES_RESET_DIAG->op=op;__DMB();
  int rc=service(op,op==DUAL_RELEASE?DUAL_TRAMPOLINE|1U:0);
  BES_RESET_DIAG->service_rc=(uint32_t)rc;__DMB();
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+ if(op==DUAL_RELEASE && !rc) { releases++; }
+#endif
  begin("reset",rc?failure:0);field(" round=",round);field(" session=",generation);
 #define PRINT_RESET(n) field(" " #n "=",BES_RESET_DIAG->n);
  BES_RESET_FIELDS(PRINT_RESET)
@@ -127,9 +135,8 @@ static int load(void)
  }
  return 0;
 }
-static int session_run(unsigned round)
+static int session_start(unsigned round,uint32_t start)
 {
- uint32_t start=k_uptime_get_32();
  generation=round+1;event(round,1,0,0);
  if(round==0) {
   if(service(DUAL_PREPARE,0)) { return 10; }
@@ -144,23 +151,39 @@ static int session_run(unsigned round)
  if(bes2700_mbox_resume(mailbox)) { return 14; }
  if(reset_call(round,DUAL_RELEASE,15)) { return 15; }
  event(round,4,0,k_uptime_get_32()-start);
- struct dual_status peer={0};int64_t deadline=k_uptime_get()+BES_LIFECYCLE_READY_MS;
+ return 0;
+}
+static enum bes_peer_fault wait_ready(struct bes_peer_health *health,struct dual_status *peer)
+{
+ bes_peer_health_init(health,k_uptime_get());
  do {
-  if(!peer_read(&peer) && peer_ok(&peer)) { break; }
+  bool readable=peer_read(peer)==0;
+  bes_peer_health_poll(health,k_uptime_get(),readable,readable && peer_ok(peer),peer->beat);
+  if(health->state!=BES_PEER_STARTING) { break; }
   k_msleep(1);
- } while(k_uptime_get()<deadline);
- if(!peer_ok(&peer) || service(DUAL_CHECK_CLOCK,0)) { return 16; }
+ } while(true);
+ return health->fault;
+}
+#if CONFIG_BES2700_M55_FAULT_CASE == 0
+static int session_run(unsigned round)
+{
+ uint32_t start=k_uptime_get_32();int rc=session_start(round,start);
+ if(rc) { return rc; }
+ struct dual_status peer={0};struct bes_peer_health health;
+ if(wait_ready(&health,&peer) || service(DUAL_CHECK_CLOCK,0)) { return 16; }
+ int64_t deadline;
  begin("ready",0);field(" round=",round);field(" session=",generation);
  field(" peer_ms=",peer.ms);field(" beat=",peer.beat);field(" stack=",peer.stack);
  field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
  q_start();deadline=k_uptime_get()+BES_LIFECYCLE_MESSAGE_MS;
- struct q_report r={0};uint32_t last_beat=peer.beat,base_ms=peer.ms;
+ struct q_report r={0};uint32_t base_ms=peer.ms;
  uint32_t base_beat=peer.beat,base_cycles=peer.cycles,ready_ms=k_uptime_get_32();
  while(k_uptime_get()<deadline) {
   q_snapshot(&r);if(r.finished) { break; }
   k_msleep(100);
-  if(peer_read(&peer) || !peer_ok(&peer) || peer.beat<last_beat || monitor_error) { return 17; }
-  last_beat=peer.beat;
+  bool readable=peer_read(&peer)==0;
+  if(bes_peer_health_poll(&health,k_uptime_get(),readable,readable && peer_ok(&peer),peer.beat) ||
+     monitor_error) { return 17; }
  }
  if(!r.finished || r.rc || r.session!=generation || q_wait_idle(1000)) { return 18; }
  for(unsigned side=0;side<2;side++) {
@@ -206,6 +229,83 @@ static int session_run(unsigned round)
  field(" elapsed=",k_uptime_get_32()-start);field(" reset_held=",1);
  field(" peer_idle=",1);field(" channel_clean=",1);field(" rc=",0);end();return 0;
 }
+#endif
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+static int stop_local(void *ctx) { ARG_UNUSED(ctx);return q_isolate(); }
+static int hold_peer(void *ctx) { ARG_UNUSED(ctx);return reset_call(0,DUAL_STOP,41); }
+static int confirm_peer(void *ctx) { ARG_UNUSED(ctx);return service(BES_LIFECYCLE_RESET_STATUS,0); }
+static int clear_channel(void *ctx) { ARG_UNUSED(ctx);return bes2700_mbox_reset(mailbox); }
+
+static int isolation_run(void)
+{
+ uint32_t start=k_uptime_get_32();int rc=session_start(0,start);
+ struct dual_status peer={0};struct bes_peer_health health;
+ enum bes_peer_fault fault=BES_PEER_OK;
+ if(!rc) {
+  fault=wait_ready(&health,&peer);
+  if(!fault) {
+   begin("ready",0);field(" round=",0);field(" session=",generation);
+   field(" peer_ms=",peer.ms);field(" beat=",peer.beat);field(" stack=",peer.stack);
+   field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
+   if(service(DUAL_CHECK_CLOCK,0)) { rc=16; }
+   else {
+    q_start();int64_t deadline=k_uptime_get()+BES_LIFECYCLE_READY_MS;
+    while(!fault && !monitor_error && k_uptime_get()<deadline) {
+     k_msleep(BES_PEER_POLL_MS);
+     bool readable=peer_read(&peer)==0;
+     fault=bes_peer_health_poll(&health,k_uptime_get(),readable,
+                                readable && peer_ok(&peer),peer.beat);
+    }
+   }
+  }
+  /* AXI shared diagnostics only, never peer DTCM. Injection is evidence,
+   * not an input to the reusable health decision. */
+  uint32_t stage=DUAL_TRACE->stage;__DMB();uint32_t injection=DUAL_TRACE->reason;
+  uint32_t age=(uint32_t)(k_uptime_get()-health.progress);
+  begin("detected",0);field(" session=",generation);field(" reason=",fault);
+  field(" age=",age);field(" beat=",health.beat);field(" trace_stage=",stage);
+  field(" injection=",injection);field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
+  if(fault!=CONFIG_BES2700_M55_FAULT_CASE || stage!=BES_PEER_INJECTION_STAGE ||
+     injection!=CONFIG_BES2700_M55_FAULT_CASE || monitor_error) { rc=40; }
+ }
+ /* Always attempt containment, including wrong injection/early failures.
+  * No QUIESCE acknowledgement is required from the broken peer. */
+ const struct bes_peer_isolation_ops ops={stop_local,hold_peer,confirm_peer,clear_channel};
+ struct bes_peer_isolation contained;
+ int containment_rc=bes_peer_isolate(&ops,NULL,&contained);
+ if(containment_rc && !rc) { rc=41; }
+ begin("isolated",containment_rc?41:0);field(" session=",generation);
+ field(" local_idle=",contained.local_idle);field(" reset_held=",contained.reset_held);
+ field(" channel_clean=",contained.channel_clean);field(" failed_step=",contained.failed_step);
+ field(" service_rc=",(uint32_t)contained.service_rc);field(" rc=",containment_rc?41:0);end();
+ if(!containment_rc) {
+  int hw=service(DUAL_SNAPSHOT,DUAL_HW_ADDR);
+  bool hw_bad=hw || DUAL_HW->phase!=4 || DUAL_HW->ram_sel0!=retained.ram_sel0 ||
+              DUAL_HW->ram_sel1!=retained.ram_sel1;
+  if(hw_bad && !rc) { rc=42; }
+  begin("hardware",hw_bad?42:0);field(" round=",0);field(" session=",generation);
+  field(" phase=",DUAL_HW->phase);field(" reset_clr=",DUAL_HW->reset_clr);
+  field(" ram_sel0=",DUAL_HW->ram_sel0);field(" ram_sel1=",DUAL_HW->ram_sel1);
+  field(" core_vtor=",DUAL_HW->core_vtor);field(" rc=",hw_bad?42:0);end();
+ }
+ /* Keep independent BTH liveness after both expected and unexpected faults. */
+ if(k_sem_take(&monitor_done,K_SECONDS(BES_LIFECYCLE_OBSERVE_SECONDS+1)) && !rc) { rc=31; }
+ if(monitor_error && !rc) { rc=32; }
+ if(!containment_rc) {
+  struct bes2700_mbox_raw raw;bes2700_mbox_get_raw(mailbox,&raw);
+  int held=service(BES_LIFECYCLE_RESET_STATUS,0);
+  bool held_bad=held || ((raw.local|raw.peer)&0xaU);
+  if(held_bad && !rc) { rc=43; }
+  begin("held",held_bad?43:0);field(" session=",generation);field(" reset_held=",!held);
+  field(" local_irq=",raw.local);field(" peer_irq=",raw.peer);
+  field(" rc=",held_bad?43:0);end();
+ }
+ begin("isolation_result",rc);field(" pass=",!rc);field(" session=",generation);
+ field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
+ field(" recoveries=",0);field(" rc=",rc);end();
+ return rc;
+}
+#endif
 int bes2700_lifecycle_validate(void)
 {
  bth_stage("main");const volatile struct dual_service *api=(void *)DUAL_SERVICE_ADDR;
@@ -220,10 +320,18 @@ int bes2700_lifecycle_validate(void)
  if(service_errors || state_errors) { rc=1; }
  if(!rc) { service=(void *)(uintptr_t)fn; }
  if(!rc && dual_image_check(m55_payload,sizeof(m55_payload),M55_PAYLOAD_CRC)) { rc=2; }
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+ begin("isolation_begin",rc);field(" version=",1);field(" layout=",BES_LIFECYCLE_LAYOUT);
+ field(" build=",BTH_DIAG->build);field(" m55_build=",M55_BUILD_ID);field(" pair=",CONFIG_DUAL_CC_PAIR);
+ field(" fault_case=",CONFIG_BES2700_M55_FAULT_CASE);field(" ready_ms=",BES_PEER_READY_MS);
+ field(" heartbeat_ms=",BES_PEER_HEARTBEAT_MS);field(" duration=",BES_LIFECYCLE_OBSERVE_SECONDS);
+ field(" rc=",rc);end();
+#else
  begin("begin",rc);field(" version=",4);field(" layout=",BES_LIFECYCLE_LAYOUT);
  field(" build=",BTH_DIAG->build);field(" m55_build=",M55_BUILD_ID);
  field(" pair=",CONFIG_DUAL_CC_PAIR);field(" rounds=",BES_LIFECYCLE_ROUNDS);
  field(" restarts=",BES_LIFECYCLE_ROUNDS-1);field(" target=",BES_LIFECYCLE_TARGET);field(" duration=",BES_LIFECYCLE_OBSERVE_SECONDS);field(" rc=",rc);end();
+#endif
  if(rc==1) {
   begin("precheck",rc);field(" dispatch=",fn);field(" service_layout=",api->layout);
   field(" service_errors=",service_errors);field(" state_errors=",state_errors);
@@ -233,12 +341,17 @@ int bes2700_lifecycle_validate(void)
  }
  if(!rc) {
   k_timer_start(&timer,K_MSEC(100),K_MSEC(100));k_sem_give(&monitor_start);
+#if CONFIG_BES2700_M55_FAULT_CASE > 0
+  (void)isolation_run();
+  k_timer_stop(&timer);bth_log_reset();return 0;
+#else
   for(unsigned i=0;i<BES_LIFECYCLE_ROUNDS;i++) {
    rc=session_run(i);if(rc || monitor_error) { if(!rc) { rc=30; }break; }completed++;
   }
   /* Peer held reset after all sessions; observe BTH to fixed 600s. */
   if(!rc && k_sem_take(&monitor_done,K_SECONDS(BES_LIFECYCLE_OBSERVE_SECONDS+1))) { rc=31; }
   if(!rc && monitor_error) { rc=32; }
+#endif
  }
  k_timer_stop(&timer);k_thread_abort(r1_monitor);q_stop();
  if(rc && service) {

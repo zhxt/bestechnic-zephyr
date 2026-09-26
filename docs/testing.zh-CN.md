@@ -47,7 +47,7 @@
   --cross-compile "${CROSS_COMPILE:?Set up the toolchain first}"
 ```
 
-`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表全部五种场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建四种消息场景，但不进行实板验收；重启场景可单独选择 `--profiles m55-restart`。
+`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表全部七种场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建四种消息场景，但不进行实板验收；重启场景可单独选择 `--profiles m55-restart`。
 
 输出目录包含 `summary.json`、`repository.log`、`host.log`，以及所选配置的构建日志和构建目录。预期汇总 `status` 为 `pass`、各项 `exit_code` 为 0；所构建包的 `SHA256SUMS` 也会被核对。脚本不操作硬件，汇总中的 `hardware` 保持 `not_tested`。正式候选可追加 `--formal`，要求见[候选包来源](../CONTRIBUTING.zh-CN.md#候选包来源)。
 
@@ -66,10 +66,12 @@
 | ipc-fault-injection | 双端错误注入、错误检测及前后正常通信检查，完成后继续观察心跳 | 600 秒 |
 | ipc-backpressure-1h | 双向持续通信 3600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 3610 秒 |
 | m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 600 秒 |
+| m55-ready-timeout | M55 在 READY 前停止，检测超时并隔离 | 600 秒 |
+| m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 600 秒 |
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
 
-`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；完整运行需包含 11 次会话和至少 601 条 BTH 心跳。该场景是新的实板候选，主机和构建通过不代表已经实板通过。
+`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；完整运行需包含 11 次会话和至少 601 条 BTH 心跳。实板结论以匹配镜像的独立验证报告为准。
 
 以下以 ipc-fault-injection 为例；选择其他配置时修改变量，各配置使用独立构建目录：
 
@@ -118,6 +120,8 @@ mkdir -p validation
 开始测试前查看待测包 `layout.json` 的 `duration_seconds`，据此预留心跳观察时间。消息阶段结束后仍可能继续输出心跳，日志应保留到最终双核运行结果，不能仅凭消息结束就停止采集。实际通过情况由下一节的解析器判定。
 
 ### 解析与判读
+
+两个隔离场景使用包内 `analyze_dual_isolation.py`，要求见[故障隔离契约](m55-restart.zh-CN.md#故障隔离场景)。它们保持 M55 复位，不执行自动重载。
 
 四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
 

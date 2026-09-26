@@ -86,6 +86,7 @@ def configure(a):
               f'CONFIG_DUAL_M55_BUILD=0x{identity["m55_build"]:08x}\n'
               f'CONFIG_DUAL_MSG_MODE={mode}\nCONFIG_DUAL_IPC_SECONDS={duration}\n')
     common += 'CONFIG_BES2700_M55_RESTART=' + ('y' if scenario.m55_restart else 'n') + '\n'
+    common += f'CONFIG_BES2700_M55_FAULT_CASE={scenario.fault_case}\n'
     write(a.generated / 'm55.conf', common)
     write(a.generated / 'bth.conf', common + f'CONFIG_DUAL_DURATION_SECONDS={identity["heartbeat"]}\n')
     write(a.generated / 'boot_profile_id.h',
@@ -281,6 +282,24 @@ def final(a):
                       lifecycle=identity['lifecycle'], reset_diagnostic=identity['reset_diagnostic'],
                       reset_sampler=report['reset_timer']['sampler'],
                       repark_diagnostic=identity['repark_diagnostic'])
+    fault_case = get_profile(identity['validation_profile']).fault_case
+    for elf in (belf, melf):
+        conf = (elf.parent / '.config').read_text()
+        if f'CONFIG_BES2700_M55_FAULT_CASE={fault_case}\n' not in conf:
+            raise ValueError('fault injection configuration mismatch')
+    if fault_case:
+        health = (ROOT / 'include/bestechnic/bes2700yp/bes2700_peer_health.h').read_text()
+        contract = {}
+        for key, name in [('ready_timeout_ms', 'READY_MS'),
+                          ('heartbeat_timeout_ms', 'HEARTBEAT_MS'),
+                          ('fault_poll_ms', 'POLL_MS'), ('injection_stage', 'INJECTION_STAGE'),
+                          ('injection_beats', 'INJECTION_BEATS')]:
+            match = re.search(r'^#define BES_PEER_' + name + r' (\d+)U$', health, re.M)
+            if not match:
+                raise ValueError('missing peer health contract: ' + name)
+            contract[key] = int(match[1])
+        layout.update(version='M55_ISOLATION_V1_T2', isolation_version=1,
+                      fault_case=fault_case, restart_rounds=1, **contract)
     save(build / 'layout.json', layout)
     save(build / 'offline-validation.json', report)
     manifest = dict(identity, version='bestechnic-zephyr-v1', offline='pass', hardware='not_tested',

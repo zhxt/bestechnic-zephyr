@@ -109,3 +109,55 @@ readback and restoration, memory preservation and interrupt-state restoration.
 ELF audit verifies the SRAM placement and service call path. Board tests remain
 necessary to validate physical mapping, register synchronization and IRQ
 timing. See the [test guide](testing.md) for the package and log workflow.
+
+## Fault isolation profiles
+
+`m55-ready-timeout` and `m55-heartbeat-stop` exercise terminal isolation while
+BTH remains healthy. They use the same retained-RAM bootstrap services and
+fixed clock/cache configuration as normal restart. Select either with
+`-DBES_VALIDATION_PROFILE=<name>` in the sysbuild command. The default profile
+has no injected CPU halt.
+
+The first profile disables M55 interrupts and stops before publishing READY.
+The second stops after ten heartbeat publications, independently of IPC progress.
+BTH detects absence of READY after 5,000 ms or absence of heartbeat progress
+after 1,000 ms, using its local clock. Polling is bounded; an unreadable seqlock
+does not refresh the deadline, and late progress cannot clear a latched fault.
+The reusable policy is in `platforms/bes2700yp/lifecycle/health.c`.
+
+Isolation gates new local mailbox sends and both interrupts without clearing
+remote state, then aborts the local worker. This is limited to the current
+uniprocessor images: the worker holds no mutexes or allocated resources, and its
+callback only signals a semaphore. BTH then asserts and confirms M55 CPU reset
+before clearing hardware channel 1. Any failed step prevents later steps.
+There is no QUIESCE acknowledgement requirement, DTCM snapshot while held reset,
+REPARK, reload, business replay, or automatic retry. CPU reset does not stop
+other bus masters; these profiles do not enable DMA.
+
+After isolation, the existing monitor continues to 601 samples over 600 seconds
+from the start of BTH observation. Final checks confirm reset is still held and
+both channel-1 raw notification/completion flags are clear. Expected fault
+reasons are 1 (READY timeout) and 2 (heartbeat timeout); an unexpected fault or
+containment failure is a failed test even if BTH continues running.
+
+Use the full matching package and its analyzer:
+
+```sh
+python release/analyze_dual_isolation.py current_boot.cap \
+  --manifest release/layout.json --output analysis.json
+```
+
+Acceptance requires the matching injection marker, bounded detection, RELEASE
+and STOP reset diagnostics, local-idle/reset-held/channel-clean evidence, the
+complete BTH observation, and `isolation_result pass=1` with one release and
+zero recoveries. The analyzer returns 0/1/2 for pass/fail/incomplete. A result
+line alone is insufficient. Archive three independent physical cold boots per
+profile for milestone acceptance; first inspect one complete run before doing
+the repeats. Record cold boots separately because serial output cannot prove
+power removal. Host tests exercise policy deadlines, isolation step failures,
+the actual worker's terminal gate, mailbox register behavior, and negative
+parser cases; they do not prove physical reset or bus timing.
+
+Normal restart and the four message profiles remain regressions for shared
+worker, mailbox, and bootstrap changes. Automatic M55 reload and further fault
+classes require a separate lifecycle extension.
