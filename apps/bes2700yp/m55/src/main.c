@@ -45,6 +45,14 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 #endif
 static void inject_fault(void)
 {
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ /* Test selection is separate from health policy. Validate the control block
+  * before suppressing injection in the one permitted replacement session. */
+ if (BES_LIFECYCLE_CTL->magic==BES_LIFECYCLE_MAGIC &&
+     BES_LIFECYCLE_CTL->layout==BES_LIFECYCLE_LAYOUT &&
+     BES_LIFECYCLE_CTL->guard==BES_LIFECYCLE_GUARD &&
+     BES_LIFECYCLE_CTL->session==2) { return; }
+#endif
  __disable_irq();
  dual_trace_record(BES_PEER_INJECTION_STAGE,CONFIG_BES2700_M55_FAULT_CASE);
  for (;;) { __NOP(); }

@@ -135,7 +135,7 @@ static int load(void)
  }
  return 0;
 }
-static int session_start(unsigned round,uint32_t start)
+static int session_park(unsigned round,uint32_t start)
 {
  generation=round+1;event(round,1,0,0);
  if(round==0) {
@@ -146,12 +146,26 @@ static int session_start(unsigned round,uint32_t start)
  if(service(DUAL_SNAPSHOT,DUAL_HW_ADDR)) { return 25; }
  if(!round) { retained=*DUAL_HW; }
  if(DUAL_HW->ram_sel0!=retained.ram_sel0 || DUAL_HW->ram_sel1!=retained.ram_sel1) { return 26; }
+ return 0;
+}
+static int session_load(unsigned round,uint32_t start)
+{
  if(load()) { return 13; }
- event(round,3,0,k_uptime_get_32()-start);
+ event(round,3,0,k_uptime_get_32()-start);return 0;
+}
+static int session_release(unsigned round,uint32_t start)
+{
  if(bes2700_mbox_resume(mailbox)) { return 14; }
  if(reset_call(round,DUAL_RELEASE,15)) { return 15; }
  event(round,4,0,k_uptime_get_32()-start);
  return 0;
+}
+static int session_start(unsigned round,uint32_t start)
+{
+ int rc=session_park(round,start);
+ if(!rc) { rc=session_load(round,start); }
+ if(!rc) { rc=session_release(round,start); }
+ return rc;
 }
 static enum bes_peer_fault wait_ready(struct bes_peer_health *health,struct dual_status *peer)
 {
@@ -164,11 +178,9 @@ static enum bes_peer_fault wait_ready(struct bes_peer_health *health,struct dual
  } while(true);
  return health->fault;
 }
-#if CONFIG_BES2700_M55_FAULT_CASE == 0
-static int session_run(unsigned round)
+#if CONFIG_BES2700_M55_FAULT_CASE == 0 || defined(CONFIG_BES2700_M55_RECOVERY)
+static int session_finish(unsigned round,uint32_t start)
 {
- uint32_t start=k_uptime_get_32();int rc=session_start(round,start);
- if(rc) { return rc; }
  struct dual_status peer={0};struct bes_peer_health health;
  if(wait_ready(&health,&peer) || service(DUAL_CHECK_CLOCK,0)) { return 16; }
  int64_t deadline;
@@ -230,9 +242,33 @@ static int session_run(unsigned round)
  field(" peer_idle=",1);field(" channel_clean=",1);field(" rc=",0);end();return 0;
 }
 #endif
+#if CONFIG_BES2700_M55_FAULT_CASE == 0
+static int session_run(unsigned round)
+{
+ uint32_t start=k_uptime_get_32();int rc=session_start(round,start);
+ return rc?rc:session_finish(round,start);
+}
+#endif
+#ifdef CONFIG_BES2700_M55_RECOVERY
+static uint32_t recovery_start;
+static int recover_park(void *ctx)
+{
+ ARG_UNUSED(ctx);recovery_start=k_uptime_get_32();
+ return session_park(1,recovery_start);
+}
+static int recover_rebuild(void *ctx)
+{
+ ARG_UNUSED(ctx);int rc=q_rearm();
+ begin("worker_rebuilt",rc?44:0);field(" session=",generation);
+ field(" rc=",rc?44:0);end();return rc;
+}
+static int recover_load(void *ctx) { ARG_UNUSED(ctx);return session_load(1,recovery_start); }
+static int recover_release(void *ctx) { ARG_UNUSED(ctx);return session_release(1,recovery_start); }
+static int recover_run(void *ctx) { ARG_UNUSED(ctx);return session_finish(1,recovery_start); }
+#endif
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
 static int stop_local(void *ctx) { ARG_UNUSED(ctx);return q_isolate(); }
-static int hold_peer(void *ctx) { ARG_UNUSED(ctx);return reset_call(0,DUAL_STOP,41); }
+static int hold_peer(void *ctx) { ARG_UNUSED(ctx);return reset_call(generation?generation-1:0,DUAL_STOP,41); }
 static int confirm_peer(void *ctx) { ARG_UNUSED(ctx);return service(BES_LIFECYCLE_RESET_STATUS,0); }
 static int clear_channel(void *ctx) { ARG_UNUSED(ctx);return bes2700_mbox_reset(mailbox); }
 
@@ -288,6 +324,25 @@ static int isolation_run(void)
   field(" ram_sel0=",DUAL_HW->ram_sel0);field(" ram_sel1=",DUAL_HW->ram_sel1);
   field(" core_vtor=",DUAL_HW->core_vtor);field(" rc=",hw_bad?42:0);end();
  }
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ struct bes_peer_recovery recovery={0};
+ if(!rc && !containment_rc) {
+  begin("recovery_begin",0);field(" old_session=",generation);
+  field(" new_session=",generation+1);field(" limit=",1);field(" rc=",0);end();
+  const struct bes_peer_recovery_ops recovery_ops={recover_park,recover_rebuild,
+                                                  recover_load,recover_release,recover_run};
+  if(bes_peer_recover(&recovery_ops,NULL,&contained,&recovery)) {
+   rc=44;
+   /* No second attempt, even if the peer reached READY before failing. */
+   containment_rc=bes_peer_isolate(&ops,NULL,&contained);
+   begin("recovery_failed",rc);field(" session=",generation);
+   field(" step=",recovery.failed_step);field(" operation_rc=",(uint32_t)recovery.operation_rc);
+   field(" local_idle=",contained.local_idle);field(" reset_held=",contained.reset_held);
+   field(" channel_clean=",contained.channel_clean);field(" containment_rc=",(uint32_t)containment_rc);
+   field(" rc=",rc);end();
+  }
+ }
+#endif
  /* Keep independent BTH liveness after both expected and unexpected faults. */
  if(k_sem_take(&monitor_done,K_SECONDS(BES_LIFECYCLE_OBSERVE_SECONDS+1)) && !rc) { rc=31; }
  if(monitor_error && !rc) { rc=32; }
@@ -300,9 +355,16 @@ static int isolation_run(void)
   field(" local_irq=",raw.local);field(" peer_irq=",raw.peer);
   field(" rc=",held_bad?43:0);end();
  }
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ begin("recovery_result",rc);field(" pass=",!rc);field(" session=",generation);
+ field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
+ field(" attempts=",recovery.attempts);field(" recoveries=",recovery.completed);
+#else
  begin("isolation_result",rc);field(" pass=",!rc);field(" session=",generation);
  field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
- field(" recoveries=",0);field(" rc=",rc);end();
+ field(" recoveries=",0);
+#endif
+ field(" rc=",rc);end();
  return rc;
 }
 #endif

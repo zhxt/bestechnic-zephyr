@@ -7,7 +7,9 @@ struct q_report { uint32_t finished, rc, session; struct q_state bth, m55; struc
 void q_prepare(uint32_t build, uint32_t session);
 void q_start(void);
 void q_stop(void);
-/* Terminal local isolation: no subsequent q_start/q_prepare is permitted. */
+/* Gates q_start/q_prepare until an explicit, successful q_rearm. */
 int q_isolate(void);
+/* Recovery manager only: after reset/channel confirmation and REPARK. */
+int q_rearm(void);
 void q_snapshot(struct q_report *out);
 #endif

@@ -64,6 +64,8 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 | `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | 600 s |
 | `m55-ready-timeout` | Halt M55 before READY; detect timeout and isolate it | 600 s |
 | `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | 600 s |
+| `m55-ready-recovery` | READY timeout, isolation and one new session with 1,000 messages each way | 600 s |
+| `m55-heartbeat-recovery` | Heartbeat stop, isolation and one new session with 1,000 messages each way | 600 s |
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
 
@@ -116,6 +118,8 @@ BTH normally reports both cores. A trailing `pass` line alone is insufficient; t
 ### Analyze results
 
 The two isolation profiles use packaged `analyze_dual_isolation.py`; see the [fault isolation contract](m55-restart.md#fault-isolation-profiles). They keep M55 held in reset and do not reload it.
+
+The two recovery profiles use packaged `analyze_dual_recovery.py`; see [one-attempt recovery](m55-restart.md#one-attempt-fault-recovery). The recovered session completes messages and normal shutdown before BTH finishes its observation.
 
 For the four message profiles, the packaged `analyze_dual_message.py` checks boot, timing, heartbeats, and messages together. For `m55-restart`, use packaged `analyze_dual_restart.py` with the same `--manifest` and `--output` arguments. Keep the full package because analyzers import companion files; use the versions matching the flashed image:
 

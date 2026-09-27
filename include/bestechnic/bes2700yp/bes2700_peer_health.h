@@ -40,4 +40,19 @@ struct bes_peer_isolation {
 };
 int bes_peer_isolate(const struct bes_peer_isolation_ops *ops, void *context,
  struct bes_peer_isolation *result);
+/* One attempt per BTH boot, consumed even when an operation fails. The caller
+ * must contain the peer again on failure; none of these operations retries. */
+struct bes_peer_recovery_ops {
+ int (*park)(void *context);
+ int (*rebuild)(void *context);
+ int (*load)(void *context);
+ int (*release)(void *context);
+ int (*run)(void *context);
+};
+struct bes_peer_recovery {
+ uint32_t attempts, completed, failed_step;
+ int operation_rc;
+};
+int bes_peer_recover(const struct bes_peer_recovery_ops *ops, void *context,
+ const struct bes_peer_isolation *isolated, struct bes_peer_recovery *result);
 #endif

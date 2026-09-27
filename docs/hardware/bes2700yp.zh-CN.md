@@ -71,6 +71,8 @@ UART 驱动当前仅适用于 BTH。默认 BTH UART 设备节点未启用，两�
 
 M55 故障隔离提供可选 `m55-ready-timeout` 和 `m55-heartbeat-stop` 场景，检测后保持对端复位并继续 BTH 监测；默认不启用，尚不自动重载。接口及验收见[故障隔离契约](../m55-restart.zh-CN.md#故障隔离场景)，实板结论关联具体镜像报告。
 
+可选 `m55-ready-recovery` 和 `m55-heartbeat-recovery` 增加一次受控重载及新会话通信。见[恢复范围与验收](../m55-restart.zh-CN.md#一次受控故障恢复)；默认不启用，实板结论关联具体镜像。
+
 ### 尚未接入的芯片资源
 
 下表描述本仓尚未提供的 BES2700YP 适配，与 Zephyr 上游是否具有相应子系统无关。

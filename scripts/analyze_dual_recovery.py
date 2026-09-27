@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Require real isolation, one new session, restored traffic and 600s BTH health."""
+import argparse
+import json
+from pathlib import Path
+import analyze_boot_profile as profile
+from analyze_dual_isolation import Isolation
+from analyze_dual_restart import PREFIX, Restart
+from validation_profiles import validate_manifest
+
+
+class Recovery:
+    @staticmethod
+    def analyze(text, manifest):
+        errors, missing, initial, continuation, records = [], [], [], [], []
+        phase = 0
+        previous_initial = previous_continuation = None
+        begin_time = held_time = sample_time = last_time = None
+        rebuilt = False
+        samples = 0
+        mapping = None
+        case = manifest.get('fault_case')
+        expected_meta = dict(recovery_version=1, recovery_limit=1, injection_session=1)
+        if any(type(manifest.get(k)) is not int or manifest[k] != v
+               for k, v in expected_meta.items()):
+            errors.append('manifest recovery contract')
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            if phase == 3 and 'zephyr_' not in line:
+                continue
+            match = PREFIX.fullmatch(line)
+            if not match:
+                if index == len(lines)-1 and not line.endswith(' !') and phase != 3:
+                    missing.append('truncated last record')
+                else:
+                    errors.append('malformed prefix/record')
+                continue
+            ts, level, module, context, namespace, body = match.groups()
+            if phase == 3:
+                errors.append('record after result')
+            if ts != 'NA':
+                now = int(ts)
+                if now > 0xffffffffffffffff or (last_time is not None and now < last_time):
+                    errors.append('timestamp order')
+                last_time = now
+            else:
+                now = None
+            if namespace == 'zephyr_bth':
+                if phase:
+                    errors.append('boot after recovery')
+                initial.append(line)
+                continue
+            if (namespace, module, context, level) != ('zephyr_r1', 'R1', 'MAIN', 'I') or now is None:
+                errors.append('recovery prefix/runtime error')
+            kind, *words = body.split()
+            try:
+                pairs = [word.split('=', 1) for word in words]
+                d = {k: int(v, 0) for k, v in pairs}
+                if len(d) != len(pairs) or any(not 0 <= v <= 0xffffffffffffffff for v in d.values()):
+                    raise ValueError()
+            except ValueError:
+                errors.append('invalid fields')
+                continue
+            if d.get('rc', 0) or d.get('error', 0):
+                errors.append('runtime error')
+            records.append(dict(kind=kind, time=now, fields=d))
+            if kind == 'sample':
+                if phase >= 2:
+                    errors.append('sample after final hold')
+                initial.append(line)
+                samples += 1
+                sample_time = now
+            elif kind == 'recovery_begin':
+                if (phase != 0 or previous_initial != 'hardware'
+                        or d != dict(old_session=1, new_session=2, limit=1, rc=0)):
+                    errors.append('recovery entry/order')
+                phase = 1
+                begin_time = now
+            elif kind == 'worker_rebuilt':
+                if (phase != 1 or rebuilt or previous_continuation != ('event', 2)
+                        or d != dict(session=2, rc=0)):
+                    errors.append('worker rebuild identity/order')
+                rebuilt = True
+            elif kind == 'held':
+                if (phase != 1 or previous_continuation != ('session', None)
+                        or set(d) != set('session reset_held local_irq peer_irq rc'.split())
+                        or d.get('session') != 2 or d.get('reset_held') != 1
+                        or (d.get('local_irq', 0) | d.get('peer_irq', 0)) & 0xa
+                        or samples != 601 or now is None or sample_time is None or now < sample_time):
+                    errors.append('final reset/channel evidence')
+                phase = 2
+                held_time = now
+            elif kind == 'recovery_result':
+                if (phase != 2 or not rebuilt or d != {
+                        'pass': 1, 'session': 2, 'reason': case, 'samples': 601,
+                        'releases': 2, 'attempts': 1, 'recoveries': 1, 'rc': 0}
+                        or now is None or held_time is None or now < held_time):
+                    errors.append('final recovery result/order')
+                phase = 3
+            elif phase == 0:
+                initial.append(line)
+                previous_initial = kind
+                if kind == 'hardware':
+                    mapping = (d.get('ram_sel0'), d.get('ram_sel1'))
+            elif phase == 1:
+                if kind == 'event' and d.get('step') == 3 and not rebuilt:
+                    errors.append('load before worker rebuild')
+                if (now is None or begin_time is None or not 0 <= now-begin_time <= 45000):
+                    errors.append('recovery deadline')
+                continuation.append(line)
+                previous_continuation = (kind, d.get('step'))
+            else:
+                errors.append('unexpected recovery record')
+        if phase != 3:
+            missing.append('recovery incomplete')
+        if not rebuilt:
+            missing.append('worker rebuild missing')
+        # Both validators consume the original evidence, without synthesizing
+        # successful boot, isolation or traffic records for either session.
+        isolated = Isolation.analyze('\n'.join(initial), manifest, terminal=False)['sessions'][0]
+        restarted = Restart.analyze('\n'.join(continuation), manifest,
+                                    continuation=True, ram_mapping=mapping)['sessions'][0]
+        for label, result in [('isolation', isolated), ('new session', restarted)]:
+            errors.extend(label + ': ' + item for item in result['errors'])
+            missing.extend(label + ': ' + item for item in result['missing'])
+        status = 'fail' if errors else 'incomplete' if missing else 'pass'
+        session = dict(status=status, errors=errors, missing=missing,
+                       records=records, samples=isolated['samples'])
+        return dict(status=status, session_count=1, sessions=[session])
+
+
+def analyze(text, manifest):
+    try:
+        scenario = validate_manifest(manifest, restart=True, isolation=True, recovery=True)
+        if manifest.get('fault_case') != scenario.fault_case:
+            raise ValueError('fault case/profile mismatch')
+    except ValueError as error:
+        return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
+    previous = profile.dual
+    try:
+        profile.dual = Recovery
+        return profile.analyze(text, manifest)
+    finally:
+        profile.dual = previous
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('log', type=Path)
+    parser.add_argument('--manifest', type=Path, required=True)
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    result = analyze(args.log.read_bytes().decode('latin1'), json.loads(args.manifest.read_text()))
+    content = json.dumps(result, indent=2) + '\n'
+    if args.output:
+        args.output.write_text(content)
+    print(content, end='')
+    return {'pass': 0, 'fail': 1, 'incomplete': 2}[result['status']]
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

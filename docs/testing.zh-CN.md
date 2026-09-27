@@ -68,6 +68,8 @@
 | m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 600 秒 |
 | m55-ready-timeout | M55 在 READY 前停止，检测超时并隔离 | 600 秒 |
 | m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 600 秒 |
+| m55-ready-recovery | READY 超时隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
+| m55-heartbeat-recovery | 心跳停止隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
 
@@ -122,6 +124,8 @@ mkdir -p validation
 ### 解析与判读
 
 两个隔离场景使用包内 `analyze_dual_isolation.py`，要求见[故障隔离契约](m55-restart.zh-CN.md#故障隔离场景)。它们保持 M55 复位，不执行自动重载。
+
+两个恢复场景使用包内 `analyze_dual_recovery.py`，见[一次受控故障恢复](m55-restart.zh-CN.md#一次受控故障恢复)。新会话完成消息和正常停止后，BTH 继续完成观察。
 
 四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
 

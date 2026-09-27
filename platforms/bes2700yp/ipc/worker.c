@@ -343,12 +343,28 @@ static void worker(void *a,void *b,void *c)
 #endif
 #endif
 }
+#if defined(CC_BTH) && defined(CONFIG_BES2700_M55_RECOVERY)
+K_THREAD_STACK_DEFINE(q_stack,4096);
+static struct k_thread q_thread;
+static k_tid_t const q_worker=&q_thread;
+static bool worker_created, worker_dormant;
+static void create_worker(void)
+{
+ k_thread_create(q_worker,q_stack,K_THREAD_STACK_SIZEOF(q_stack),worker,
+                 NULL,NULL,NULL,5,0,K_FOREVER);
+ worker_created=true;worker_dormant=true;
+}
+#else
 K_THREAD_DEFINE(q_worker,4096,worker,NULL,NULL,NULL,5,0,0);
+#endif
 #ifdef CC_BTH
 void q_prepare(uint32_t build,uint32_t session)
 {
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
  if(isolated) { return; }
+#endif
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ if(!worker_created) { create_worker(); }
 #endif
 #ifdef CONFIG_BES2700_M55_RESTART
  /* Caller has consumed q_stopped before later sessions. Worker is blocked. */
@@ -371,6 +387,10 @@ void q_start(void)
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
  if(isolated) { return; }
 #endif
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ if(!worker_created) { return; }
+ if(worker_dormant) { worker_idle=0;worker_dormant=false;k_thread_start(q_worker); }
+#endif
  k_sem_give(&q_started);
 }
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
@@ -378,18 +398,47 @@ void q_start(void)
  * This worker owns no mutexes or allocated resources. IRQs are masked first;
  * its callback only posts q_received, and cannot outlive this UP call. */
 #ifdef CONFIG_SMP
-#error "Terminal worker isolation requires a uniprocessor Zephyr image"
+#error "Worker isolation requires a uniprocessor Zephyr image"
 #endif
 int q_isolate(void)
 {
  isolated=true;
  int rc=bes2700_mbox_suspend(mailbox);
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ if(worker_created) { k_thread_abort(q_worker); }
+#else
  k_thread_abort(q_worker);
+#endif
  __DSB();worker_idle=1;__DMB();
  return rc;
 }
 #endif
-void q_stop(void) { k_thread_abort(q_worker);(void)mbox_set_enabled(mailbox,0,false); }
+#ifdef CONFIG_BES2700_M55_RECOVERY
+/* Called after successful containment and REPARK, with mailbox still masked.
+ * Does not touch shared RAM. The new thread remains dormant until q_start(). */
+int q_rearm(void)
+{
+ if(!isolated || !worker_idle || !worker_created || k_thread_join(q_worker,K_NO_WAIT)) {
+  return -EBUSY;
+ }
+ k_sem_reset(&q_started);k_sem_reset(&q_stopped);k_sem_reset(&q_received);
+ k_spinlock_key_t key=k_spin_lock(&report_lock);
+ report=(struct q_report){0};k_spin_unlock(&report_lock,key);
+ own=(struct q_state){0};other=(struct q_state){0};active_start=0;peer_build=0;
+ for(unsigned i=0;i<BI_DEPTH;i++) { sent_at[i]=0; }
+ for(unsigned i=0;i<11;i++) { cases[i]=(struct q_case){0}; }
+ create_worker();isolated=false;return 0;
+}
+#endif
+void q_stop(void)
+{
+#ifdef CONFIG_BES2700_M55_RECOVERY
+ if(worker_created) { k_thread_abort(q_worker); }
+#else
+ k_thread_abort(q_worker);
+#endif
+ (void)mbox_set_enabled(mailbox,0,false);
+}
 void q_snapshot(struct q_report *out)
 { k_spinlock_key_t key=k_spin_lock(&report_lock);*out=report;k_spin_unlock(&report_lock,key); }
 #endif

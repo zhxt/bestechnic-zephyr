@@ -35,3 +35,11 @@ config BES2700_M55_FAULT_CASE
  help
    Validation only. Nonzero values require the retained-RAM lifecycle.
    The M55 CPU deliberately stops with interrupts disabled.
+
+config BES2700_M55_RECOVERY
+ bool "Validate one M55 recovery after isolation"
+ depends on BES2700_M55_RESTART && BES2700_M55_FAULT_CASE > 0
+ default n
+ help
+   Rebuild the BTH worker and reload M55 once with a new session.
+   Inject only in session 1; failed recovery remains isolated.

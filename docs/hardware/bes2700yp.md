@@ -69,6 +69,8 @@ The UART driver supports BTH only. BTH's UART device node and Zephyr Serial/Cons
 
 Optional M55 fault isolation profiles are described in the [isolation contract](../m55-restart.md#fault-isolation-profiles). They are disabled by default and do not reload M55. Hardware results belong to each image report.
 
+Optional `m55-ready-recovery` and `m55-heartbeat-recovery` add one controlled reload and a new message session. See [recovery scope and acceptance](../m55-restart.md#one-attempt-fault-recovery); these profiles are disabled by default and require image-specific board evidence.
+
 ### Resources not integrated
 
 This table concerns this repository, regardless of upstream Zephyr subsystem availability:

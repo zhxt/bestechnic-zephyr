@@ -45,3 +45,19 @@ int bes_peer_isolate(const struct bes_peer_isolation_ops *ops, void *context,
  r->channel_clean=1;r->failed_step=0;
  return 0;
 }
+
+int bes_peer_recover(const struct bes_peer_recovery_ops *ops, void *context,
+ const struct bes_peer_isolation *isolated, struct bes_peer_recovery *r)
+{
+ if(r->attempts || isolated->local_idle!=1 || isolated->reset_held!=1 ||
+    isolated->channel_clean!=1 || isolated->failed_step || isolated->service_rc) {
+  return -1;
+ }
+ r->attempts=1;r->completed=0;
+ int (*const steps[])(void *)={ops->park,ops->rebuild,ops->load,ops->release,ops->run};
+ for(unsigned i=0;i<sizeof(steps)/sizeof(steps[0]);i++) {
+  r->failed_step=i+1;r->operation_rc=steps[i](context);
+  if(r->operation_rc) { return -1; }
+ }
+ r->failed_step=0;r->completed=1;return 0;
+}

@@ -157,4 +157,44 @@ python release/analyze_dual_isolation.py current_boot.cap \
 mailbox 寄存器模型及解析器负例，不能代替真实复位和总线时序验证。
 
 公共 worker、mailbox 或 bootstrap 变化仍需回归正常重启及四种消息场景。
-自动重载和其他故障类型另行扩展生命周期契约。
+下述恢复场景在隔离边界之后增加一次受控重载。
+
+## 一次受控故障恢复
+
+`m55-ready-recovery` 和 `m55-heartbeat-recovery` 仅在 session 1 注入对应故障。
+隔离成功后，BTH 每次启动最多执行一次恢复尝试。`health.c` 中的固定预算策略拒绝
+不完整的隔离前提，并在调用任何恢复操作前消耗本次尝试额度。
+
+管理器先执行 REPARK 并检查 RAM selector，再重建 BTH worker。确认旧线程已终止后，
+清理本地启动、停止和接收信号量、报告及计数，以原有静态线程对象和栈创建休眠线程。
+只有 PARK 使装载窗口可访问后才重新初始化共享环及 M55 状态；装载内容经过 CRC
+校验后才释放 CPU。session 2 的 READY 校验通过后，新 BTH worker 才开始通信。
+旧请求和通知被丢弃，不自动重放业务；当前验证应用没有外部调用者或请求取消接口。
+
+session 2 必须双向各完成 1000 条消息、核对 M55 健康状态，再完成正常协作的
+QUIESCE/复位/通道清理。随后 M55 保持复位，BTH 从监测开始累计观察 600 秒。
+这验证恢复通信及正常收尾，不表示 600 秒双核流量。原有两个隔离场景继续保持最终隔离行为。
+
+REPARK、worker 重建、装载、释放、READY 或通信任一步失败，都禁止后续恢复步骤。
+管理器再次尝试隔离，记录失败步骤和隔离结果，BTH 继续监测，不进行第二次重载。
+复位确认失败不能记作保持复位成功。IPC 停滞、QUIESCE 超时、fatal 专用注入场景、
+多次恢复以及 BTH/整机复位恢复留在后续批次。
+
+按对应场景构建，使用完整匹配包的分析器：
+
+```sh
+python release/analyze_dual_recovery.py current_boot.cap \
+  --manifest release/layout.json --output analysis.json
+```
+
+分析器要求原故障及隔离证据、唯一的
+`recovery_begin old_session=1 new_session=2 limit=1`、REPARK 读回、`worker_rebuilt`、
+session 2 的 READY、两端完整消息计数和正常停止结果。最终复位/通道检查及 601 条
+BTH sample 后，才允许 `recovery_result pass=1 session=2 releases=2 attempts=1 recoveries=1`
+通过；reason 必须匹配，rc 必须为零。缺失步骤、旧会话或未完成观察均不能通过。
+隔离及正常重启分析器会拒绝恢复场景。
+
+先检查每个场景一轮完整冷启动。里程碑候选冻结后，再为每个恢复场景收集三轮独立
+物理断电启动和受影响的公共路径回归。主机模型覆盖真实 worker 通信中途终止、带残留
+信号的重建、新会话隔离、单次预算及失败门控、解析器负例；实际寄存器时序和恢复能力
+仍须使用关联镜像 SHA256 的实板证据确认。

@@ -29,7 +29,7 @@ PREFIX=re.compile(r'(NA|\d+)/([IE])/BTH/([A-Z0-9]+)/([A-Z]+) \| (zephyr_\w+) (.+
 
 class Restart:
     @staticmethod
-    def analyze(text,m):
+    def analyze(text,m, *, continuation=False, ram_mapping=None):
         errors=[];missing=[];boot=[];rows=[];samples=[];last_time=None;ended=False
         expected_boot=[('begin',dict(version=1,test=8,build=int(m['build'],0))),
             ('stage',dict(stage='adapter_ready')),('adapter',dict(cpuid=0x630f1321,ipsr=0,control=0)),
@@ -81,19 +81,20 @@ class Restart:
             else:
                 rows.append(record)
                 if kind=='result':ended=True
-        expected=[('begin',None,None)]
-        for n in range(11):
+        expected=[] if continuation else [('begin',None,None)]
+        for n in (range(1,2) if continuation else range(11)):
             expected += [('event',n,1)]+([('repark',n,7)] if n else [])+[('event',n,x) for x in (2,3)]+[('reset',n,3),('event',n,4),('ready',n,None)]+[('endpoint',n,x) for x in (0,1)]+[('peer',n,None)]+[('event',n,x) for x in (5,6)]+[('reset',n,4),('event',n,7),('hardware',n,None),('event',n,8),('session',n,None)]
-        expected += [('result',None,None)]
+        if not continuation:expected += [('result',None,None)]
         actual=[(r['kind'],r['fields'].get('round'),r['fields'].get('step' if r['kind']=='event' else 'op' if r['kind'] in ('reset','repark') else 'side')) for r in rows]
         if actual!=expected[:len(actual)]:errors.append('lifecycle order/missing/duplicate')
         if len(rows)!=len(expected):missing.append('lifecycle incomplete')
-        if boot!=expected_boot:missing.append('boot incomplete')
-        if len(samples)!=601:missing.append(f'samples {len(samples)}/601')
-        if m.get('restart_version')!=4 or m.get('restart_rounds')!=11 or m.get('restart_target')!=1000 or m.get('dual_layout')!='0x000a0004' or m.get('duration_seconds')!=600 or m.get('lifecycle')!=LIFECYCLE or m.get('reset_diagnostic')!=RESET_DIAGNOSTIC or m.get('repark_diagnostic')!=REPARK_DIAGNOSTIC:errors.append('manifest contract')
+        if not continuation and boot!=expected_boot:missing.append('boot incomplete')
+        if not continuation and len(samples)!=601:missing.append(f'samples {len(samples)}/601')
+        if continuation and (boot or samples):errors.append('unexpected continuation boot/sample')
+        if m.get('restart_version')!=4 or m.get('restart_rounds')!=(2 if continuation else 11) or m.get('restart_target')!=1000 or m.get('dual_layout')!='0x000a0004' or m.get('duration_seconds')!=600 or m.get('lifecycle')!=LIFECYCLE or m.get('reset_diagnostic')!=RESET_DIAGNOSTIC or m.get('repark_diagnostic')!=REPARK_DIAGNOSTIC:errors.append('manifest contract')
         sampler=m.get('reset_sampler',0)
         if not isinstance(sampler,int) or not sampler&1 or not 0x00500000<=sampler<0x00510000:errors.append('sampler manifest')
-        endpoints={};elapsed={};origins={};release_time={};ram_mapping=None
+        endpoints={};elapsed={};origins={};release_time={}
         for r in rows:
             k=r['kind'];d=r['fields'];n=d.get('round');session=n+1 if n is not None else None
             fieldsets={'event':'round session step rc elapsed','ready':'round session peer_ms beat stack elapsed rc',

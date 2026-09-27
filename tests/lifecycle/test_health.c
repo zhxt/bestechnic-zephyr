@@ -7,6 +7,7 @@ static int local(void *p) { (void)p;return operation(1); }
 static int reset(void *p) { (void)p;return operation(2); }
 static int confirm(void *p) { (void)p;return operation(3); }
 static int clear(void *p) { (void)p;return operation(4); }
+static int run(void *p) { (void)p;return operation(5); }
 int main(void)
 {
  struct bes_peer_health h;
@@ -57,6 +58,27 @@ int main(void)
   assert(r.local_idle==(fail!=1));
   assert(r.reset_held==(!fail || fail==4));
   assert(r.channel_clean==(!fail));
+ }
+ /* One attempt only, including failure after RELEASE or during traffic. */
+ const struct bes_peer_recovery_ops recovery_ops={local,reset,confirm,clear,run};
+ const struct bes_peer_isolation good={.local_idle=1,.reset_held=1,.channel_clean=1};
+ for(fail=0;fail<=5;fail++) {
+  struct bes_peer_recovery r={0};calls=0;
+  assert(bes_peer_recover(&recovery_ops,0,&good,&r)==(fail?-1:0));
+  assert(calls==(fail?fail:5) && r.attempts==1 && r.completed==!fail);
+  assert(r.failed_step==fail && r.operation_rc==(fail?-17:0));
+  unsigned previous=calls;
+  assert(bes_peer_recover(&recovery_ops,0,&good,&r)==-1 && calls==previous);
+ }
+ /* Every missing isolation prerequisite prevents even REPARK. */
+ for(unsigned n=0;n<5;n++) {
+  struct bes_peer_isolation bad=good;struct bes_peer_recovery r={0};calls=0;
+  if(n==0) { bad.local_idle=0; }
+  if(n==1) { bad.reset_held=0; }
+  if(n==2) { bad.channel_clean=0; }
+  if(n==3) { bad.failed_step=4; }
+  if(n==4) { bad.service_rc=-1; }
+  assert(bes_peer_recover(&recovery_ops,0,&bad,&r)==-1 && !calls && !r.attempts);
  }
  return 0;
 }

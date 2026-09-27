@@ -24,7 +24,7 @@ FIELDS = {
 
 class Isolation:
     @staticmethod
-    def analyze(text, m):
+    def analyze(text, m, *, terminal=True):
         errors, missing, boot, rows, samples = [], [], [], [], []
         case = m.get('fault_case')
         expected_boot = [
@@ -38,7 +38,7 @@ class Isolation:
         ]
         fixed = dict(isolation_version=1, ready_timeout_ms=5000,
                      heartbeat_timeout_ms=1000, fault_poll_ms=20,
-                     injection_stage=6, injection_beats=10, restart_rounds=1,
+                     injection_stage=6, injection_beats=10, restart_rounds=1 if terminal else 2,
                      dual_layout='0x000a0004', duration_seconds=600)
         if (type(case) is not int or case not in (1, 2)
                 or any(type(m.get(k)) is not type(v) or m[k] != v for k, v in fixed.items())
@@ -125,7 +125,9 @@ class Isolation:
         if case == 2:
             expected.append(('ready', None))
         expected += [('detected', None), ('reset', 4), ('isolated', None),
-                     ('hardware', None), ('held', None), ('isolation_result', None)]
+                     ('hardware', None)]
+        if terminal:
+            expected += [('held', None), ('isolation_result', None)]
         actual = [(r['kind'], r['fields'].get('step' if r['kind'] == 'event' else 'op'))
                   for r in rows]
         if actual != expected[:len(actual)]:

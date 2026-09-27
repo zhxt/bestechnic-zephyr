@@ -42,8 +42,9 @@ The BTH manager in `platforms/bes2700yp/lifecycle/` owns session state, peer
 stop, M55 image loading and CPU release. `platforms/bes2700yp/resources.json`
 defines the shared-memory regions and time budgets. The bootstrap exposes a
 bounded hardware service through the public HAL interface. Only the manager
-may assert M55 CPU reset after local mailbox access is stopped and the peer's
-last shared-memory writer has exited.
+may assert M55 CPU reset. Normal restart first stops local mailbox access and
+waits for the peer's last shared-memory writer; fault isolation stops local
+access and forces reset without requiring a response from the broken peer.
 
 A normal stop drains messages, disables the local worker, waits for the peer to
 be idle, asserts and reads back CPU reset, and clears mailbox channel 1.
@@ -159,5 +160,58 @@ the actual worker's terminal gate, mailbox register behavior, and negative
 parser cases; they do not prove physical reset or bus timing.
 
 Normal restart and the four message profiles remain regressions for shared
-worker, mailbox, and bootstrap changes. Automatic M55 reload and further fault
-classes require a separate lifecycle extension.
+worker, mailbox, and bootstrap changes. The following profiles extend this
+isolation boundary with one controlled reload.
+
+## One-attempt fault recovery
+
+`m55-ready-recovery` and `m55-heartbeat-recovery` inject the corresponding fault
+only in session 1. After successful isolation, BTH permits one recovery attempt
+per boot. The fixed-budget policy in `health.c` rejects incomplete containment
+and consumes the attempt before running any recovery operation.
+
+The manager performs REPARK and checks RAM selectors before recreating the BTH
+worker. It confirms that the aborted thread has exited, resets local start,
+stop and receive semaphores, clears local reports and accounting, and recreates
+the thread with its existing static object and stack. The new thread stays
+dormant. Shared rings and M55 state are initialized only after PARK makes the
+load windows accessible. Reloaded bytes are CRC-checked before CPU release.
+Only a valid READY from session 2 permits the new BTH worker to start traffic.
+Old requests and notifications are discarded, with no automatic business replay.
+This validation application has no external caller or request-cancellation API.
+
+Session 2 must exchange 1,000 messages in each direction, validate peer health,
+and finish a cooperative QUIESCE/reset/channel-clear cycle. M55 then stays in
+reset while BTH completes 600 seconds of observation from monitor startup.
+This checks recovered communication followed by normal shutdown; it is not a
+600-second dual-core traffic test. The original isolation-only profiles retain
+their terminal behavior.
+
+A failure in REPARK, worker recreation, loading, release, READY or traffic
+prevents later recovery operations. The manager attempts containment again,
+records the failed step and containment outcome, and keeps BTH monitoring.
+There is no second reload attempt. Failed reset confirmation must not be reported
+as reset-held. IPC progress stalls, QUIESCE-timeout and fatal-specific injection
+profiles, repeated recovery and BTH/global-reset recovery are separate work.
+
+Build with the chosen profile and use the matching package:
+
+```sh
+python release/analyze_dual_recovery.py current_boot.cap \
+  --manifest release/layout.json --output analysis.json
+```
+
+The analyzer requires the original fault and isolation evidence, a single
+`recovery_begin old_session=1 new_session=2 limit=1`, REPARK readback,
+`worker_rebuilt`, session-2 READY, two complete endpoint reports and its healthy
+shutdown. Final reset/channel checks and 601 BTH samples must precede
+`recovery_result pass=1 session=2 releases=2 attempts=1 recoveries=1` (with the
+matching reason and zero rc). It rejects missing steps, stale sessions and
+incomplete observation. The isolation and restart analyzers reject these profiles.
+
+Inspect one complete cold boot per profile first. Freeze the milestone candidate
+before collecting three independent physical cold boots per recovery profile
+and the affected shared-path regressions. Host models test aborting the actual
+worker during traffic, recreating it with stale local signals, session isolation,
+one-attempt and failure gates, and parser rejection cases; register timing and
+physical recovery still require board evidence tied to the image SHA256.
