@@ -9,7 +9,7 @@ from test_restart_parser import fixture as restart_fixture
 
 
 def manifest(case=1):
-    return dict(isolation_manifest(case), recovery_version=1, recovery_limit=1,
+    return dict(isolation_manifest(case), recovery_version=1, recovery_limit=1, recovery_fail_step=0,
                 injection_session=1, restart_rounds=2,
                 validation_profile='m55-ready-recovery' if case == 1 else 'm55-heartbeat-recovery')
 
@@ -18,14 +18,14 @@ def fixture(case=1):
     original = isolation_fixture(case).splitlines()
     boot = [line for line in original if 'zephyr_bth ' in line or 'zephyr_bootprof ' in line]
     rows = [(int(line.split('/')[0]), line) for line in original
-            if 'zephyr_r1 ' in line and ' held ' not in line and ' isolation_result ' not in line]
+            if 'zephyr_lifecycle ' in line and ' held ' not in line and ' isolation_result ' not in line]
     def row(time, kind, **fields):
-        rows.append((time, f'{time}/I/BTH/R1/MAIN | zephyr_r1 {kind} ' +
+        rows.append((time, f'{time}/I/BTH/LIFECYCLE/MAIN | zephyr_lifecycle {kind} ' +
                      ' '.join(f'{k}={v}' for k, v in fields.items()) + ' !'))
     base = 8200 if case == 1 else 5100
     row(base-1, 'recovery_begin', old_session=1, new_session=2, limit=1, rc=0)
     for line in restart_fixture().splitlines():
-        if 'zephyr_r1 ' in line and ('round=1 ' in line):
+        if 'zephyr_lifecycle ' in line and ('round=1 ' in line):
             time = int(line.split('/')[0])-7100+base
             rows.append((time, str(time) + '/' + line.split('/', 1)[1]))
     row(base+3, 'worker_rebuilt', session=2, rc=0)
@@ -41,7 +41,7 @@ class RecoveryParser(unittest.TestCase):
             text, m = fixture(case), manifest(case)
             result = analyze(text, m)
             self.assertEqual(result['status'], 'pass', result)
-            partial = text[:text.index('20000/I/BTH/R1')]
+            partial = text[:text.index('20000/I/BTH/LIFECYCLE')]
             self.assertEqual(analyze(partial, m)['status'], 'incomplete')
             self.assertEqual(analyze(text + partial, m)['status'], 'incomplete')
             self.assertEqual(analyze(text[:-20], m)['status'], 'incomplete')
@@ -65,10 +65,10 @@ class RecoveryParser(unittest.TestCase):
     def test_missing_duplicate_reordered_and_failed_records(self):
         text, m = fixture(), manifest()
         for kind in ('recovery_begin', 'worker_rebuilt', 'repark', 'ready', 'endpoint', 'held'):
-            line = next(line for line in text.splitlines() if 'zephyr_r1 '+kind+' ' in line)
+            line = next(line for line in text.splitlines() if 'zephyr_lifecycle '+kind+' ' in line)
             self.assertEqual(analyze(text.replace(line+'\n', ''), m)['status'], 'fail', kind)
             self.assertEqual(analyze(text.replace(line, line+'\n'+line), m)['status'], 'fail', kind)
-        line = next(line for line in text.splitlines() if 'zephyr_r1 worker_rebuilt ' in line)
+        line = next(line for line in text.splitlines() if 'zephyr_lifecycle worker_rebuilt ' in line)
         self.assertEqual(analyze(text.replace(line, line.replace('rc=0', 'rc=44')), m)['status'], 'fail')
         # Old isolation success must never substitute for restored traffic.
         self.assertEqual(analyze(isolation_fixture(), m)['status'], 'fail')
@@ -76,7 +76,7 @@ class RecoveryParser(unittest.TestCase):
     def test_each_missing_field_is_rejected(self):
         text, m = fixture(), manifest()
         for kind in ('recovery_begin', 'worker_rebuilt', 'repark', 'held', 'recovery_result'):
-            line = next(line for line in text.splitlines() if 'zephyr_r1 '+kind+' ' in line)
+            line = next(line for line in text.splitlines() if 'zephyr_lifecycle '+kind+' ' in line)
             prefix, body = line.split(' | ', 1)
             parts = body.split()
             for i in range(2, len(parts)-1):

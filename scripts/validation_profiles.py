@@ -15,6 +15,7 @@ class ValidationProfile:
     m55_restart: bool = False
     fault_case: int = 0
     recovery: bool = False
+    recovery_fail_step: int = 0
 
 
 PROFILES = MappingProxyType({
@@ -27,6 +28,14 @@ PROFILES = MappingProxyType({
     'm55-heartbeat-stop': ValidationProfile(1, 600, 600, True, 2),
     'm55-ready-recovery': ValidationProfile(1, 600, 600, True, 1, True),
     'm55-heartbeat-recovery': ValidationProfile(1, 600, 600, True, 2, True),
+    'm55-ipc-stall-recovery': ValidationProfile(1, 600, 600, True, 3, True, 0),
+    'm55-quiesce-recovery': ValidationProfile(1, 600, 600, True, 4, True, 0),
+    'm55-fatal-recovery': ValidationProfile(1, 600, 600, True, 5, True, 0),
+    'm55-fatal-unreadable-recovery': ValidationProfile(1, 600, 600, True, 6, True, 0),
+    'm55-repark-failure': ValidationProfile(1, 600, 600, True, 2, True, 1),
+    'm55-load-failure': ValidationProfile(1, 600, 600, True, 2, True, 3),
+    'm55-recovery-ready-failure': ValidationProfile(1, 600, 600, True, 2, True, 5),
+
 })
 
 

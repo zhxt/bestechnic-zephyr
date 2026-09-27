@@ -88,6 +88,7 @@ def configure(a):
     common += 'CONFIG_BES2700_M55_RESTART=' + ('y' if scenario.m55_restart else 'n') + '\n'
     common += f'CONFIG_BES2700_M55_FAULT_CASE={scenario.fault_case}\n'
     common += 'CONFIG_BES2700_M55_RECOVERY=' + ('y' if scenario.recovery else 'n') + '\n'
+    common += f'CONFIG_BES2700_M55_RECOVERY_FAIL_STEP={scenario.recovery_fail_step}\n'
     write(a.generated / 'm55.conf', common)
     write(a.generated / 'bth.conf', common + f'CONFIG_DUAL_DURATION_SECONDS={identity["heartbeat"]}\n')
     write(a.generated / 'boot_profile_id.h',
@@ -280,6 +281,7 @@ def final(a):
         report['repark'] = audit_repark(a.elf, a.cross)
         layout.update(version='M55_RESTART_V4_T2', dual_layout='0x000a0004',
                       restart_version=4, restart_rounds=11, restart_target=1000,
+                      lifecycle_log=dict(version=2, module='LIFECYCLE', namespace='zephyr_lifecycle'),
                       lifecycle=identity['lifecycle'], reset_diagnostic=identity['reset_diagnostic'],
                       reset_sampler=report['reset_timer']['sampler'],
                       repark_diagnostic=identity['repark_diagnostic'])
@@ -289,13 +291,15 @@ def final(a):
         conf = (elf.parent / '.config').read_text()
         if f'CONFIG_BES2700_M55_FAULT_CASE={fault_case}\n' not in conf:
             raise ValueError('fault injection configuration mismatch')
+        if f'CONFIG_BES2700_M55_RECOVERY_FAIL_STEP={scenario.recovery_fail_step}\n' not in conf:
+            raise ValueError('recovery failure configuration mismatch')
         if ('CONFIG_BES2700_M55_RECOVERY=y\n' in conf) != scenario.recovery:
             raise ValueError('recovery configuration mismatch')
     if fault_case:
         health = (ROOT / 'include/bestechnic/bes2700yp/bes2700_peer_health.h').read_text()
         contract = {}
         for key, name in [('ready_timeout_ms', 'READY_MS'),
-                          ('heartbeat_timeout_ms', 'HEARTBEAT_MS'),
+                          ('heartbeat_timeout_ms', 'HEARTBEAT_MS'), ('ipc_timeout_ms', 'IPC_MS'),
                           ('fault_poll_ms', 'POLL_MS'), ('injection_stage', 'INJECTION_STAGE'),
                           ('injection_beats', 'INJECTION_BEATS')]:
             match = re.search(r'^#define BES_PEER_' + name + r' (\d+)U$', health, re.M)
@@ -306,7 +310,8 @@ def final(a):
                       fault_case=fault_case, restart_rounds=1, **contract)
     if scenario.recovery:
         layout.update(version='M55_RECOVERY_V1_T2', recovery_version=1,
-                      recovery_limit=1, injection_session=1, restart_rounds=2)
+                      recovery_limit=1, injection_session=1, restart_rounds=2,
+                      recovery_fail_step=scenario.recovery_fail_step)
     save(build / 'layout.json', layout)
     save(build / 'offline-validation.json', report)
     manifest = dict(identity, version='bestechnic-zephyr-v1', offline='pass', hardware='not_tested',

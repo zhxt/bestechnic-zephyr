@@ -27,8 +27,8 @@ static void tick(struct k_timer *t) { ARG_UNUSED(t);timer_count++;bth_log_poll()
 K_TIMER_DEFINE(timer,tick,NULL);
 static void begin(const char *kind,uint32_t rc)
 {
- k_mutex_lock(&log_lock,K_FOREVER);bth_log_begin(rc?'E':'I',"R1","MAIN");
- bth_puts("zephyr_r1 ");bth_puts(kind);
+ k_mutex_lock(&log_lock,K_FOREVER);bth_log_begin(rc?'E':'I',"LIFECYCLE","MAIN");
+ bth_puts("zephyr_lifecycle ");bth_puts(kind);
 }
 static void field(const char *key,uint32_t n) { bth_puts(key);bth_dec(n); }
 static void end(void) { bth_end();k_mutex_unlock(&log_lock); }
@@ -87,7 +87,7 @@ static void monitor(void *a,void *b,void *c)
  }
  k_sem_give(&monitor_done);
 }
-K_THREAD_DEFINE(r1_monitor,2048,monitor,NULL,NULL,NULL,-1,0,0);
+K_THREAD_DEFINE(lifecycle_monitor,2048,monitor,NULL,NULL,NULL,-1,0,0);
 static int peer_read(struct dual_status *out)
 {
  int64_t until=k_uptime_get()+20;
@@ -109,6 +109,17 @@ static int peer_ok(const struct dual_status *p)
   p->vtor==DUAL_ITCM && p->control==2 && !p->primask && !p->basepri && !p->mpu &&
   !(p->ccr&((1U<<16)|(1U<<17))) && p->stack>=128 &&
   (p->cpuid&0xff00fff0U)==0x4100d220U;
+}
+/* Only seqlock-consistent, identified AXI publications may report fatal. */
+static enum bes_peer_fault poll_health(struct bes_peer_health *h,struct dual_status *peer,
+                                      bool readable)
+{
+ if(readable && peer->magic==DUAL_MAGIC && peer->layout==DUAL_LAYOUT &&
+    peer->build==M55_BUILD_ID && peer->guard==DUAL_GUARD && peer->stage==255 &&
+    peer->error>=100) {
+  h->state=BES_PEER_FAULT;h->fault=BES_PEER_FATAL;return h->fault;
+ }
+ return bes_peer_health_poll(h,k_uptime_get(),readable,readable && peer_ok(peer),peer->beat);
 }
 static void control_init(void)
 {
@@ -172,29 +183,35 @@ static enum bes_peer_fault wait_ready(struct bes_peer_health *health,struct dual
  bes_peer_health_init(health,k_uptime_get());
  do {
   bool readable=peer_read(peer)==0;
-  bes_peer_health_poll(health,k_uptime_get(),readable,readable && peer_ok(peer),peer->beat);
+  poll_health(health,peer,readable);
   if(health->state!=BES_PEER_STARTING) { break; }
   k_msleep(1);
  } while(true);
  return health->fault;
 }
 #if CONFIG_BES2700_M55_FAULT_CASE == 0 || defined(CONFIG_BES2700_M55_RECOVERY)
+static uint32_t quiesce_started;
+static enum bes_peer_fault last_ready_fault;
 static int session_finish(unsigned round,uint32_t start)
 {
  struct dual_status peer={0};struct bes_peer_health health;
- if(wait_ready(&health,&peer) || service(DUAL_CHECK_CLOCK,0)) { return 16; }
+ last_ready_fault=wait_ready(&health,&peer);
+ if(last_ready_fault || service(DUAL_CHECK_CLOCK,0)) { return 16; }
  int64_t deadline;
  begin("ready",0);field(" round=",round);field(" session=",generation);
  field(" peer_ms=",peer.ms);field(" beat=",peer.beat);field(" stack=",peer.stack);
  field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
  q_start();deadline=k_uptime_get()+BES_LIFECYCLE_MESSAGE_MS;
- struct q_report r={0};uint32_t base_ms=peer.ms;
+ struct q_report r={0};struct bes_peer_progress progress;
+ bes_peer_progress_init(&progress,k_uptime_get());uint32_t base_ms=peer.ms;
  uint32_t base_beat=peer.beat,base_cycles=peer.cycles,ready_ms=k_uptime_get_32();
  while(k_uptime_get()<deadline) {
   q_snapshot(&r);if(r.finished) { break; }
+  bool pending=r.bth.sent>r.bth.acked || r.m55.sent>r.bth.handled;
+  if(bes_peer_progress_poll(&progress,k_uptime_get(),pending,r.bth.acked,r.bth.handled)) { return 17; }
   k_msleep(100);
   bool readable=peer_read(&peer)==0;
-  if(bes_peer_health_poll(&health,k_uptime_get(),readable,readable && peer_ok(&peer),peer.beat) ||
+  if(poll_health(&health,&peer,readable) ||
      monitor_error) { return 17; }
  }
  if(!r.finished || r.rc || r.session!=generation || q_wait_idle(1000)) { return 18; }
@@ -221,6 +238,7 @@ static int session_finish(unsigned round,uint32_t start)
  field(" ms=",peer_ms);field(" beat=",beats);field(" cycles=",cycles);
  field(" elapsed=",elapsed);field(" stack=",peer.stack);field(" guards=",1);field(" rc=",0);end();
  event(round,5,0,k_uptime_get_32()-start);
+ quiesce_started=k_uptime_get_32();
  BES_LIFECYCLE_CTL->quiesce=generation;__DSB();deadline=k_uptime_get()+BES_LIFECYCLE_QUIESCE_MS;
  while(BES_LIFECYCLE_CTL->idle!=generation && k_uptime_get()<deadline) { k_msleep(1); }
  __DMB();
@@ -253,8 +271,15 @@ static int session_run(unsigned round)
 static uint32_t recovery_start;
 static int recover_park(void *ctx)
 {
- ARG_UNUSED(ctx);recovery_start=k_uptime_get_32();
+ ARG_UNUSED(ctx);recovery_start=k_uptime_get_32();generation=2;
+#if CONFIG_BES2700_M55_RECOVERY_FAIL_STEP == 1
+ /* Fail closed before touching a mapping: injected policy error, not a
+  * claim that silicon REPARK readback was deliberately corrupted. */
+ begin("recovery_injected",0);field(" session=",generation);field(" step=",1);
+ field(" operation_rc=",12);field(" rc=",0);end();return 12;
+#else
  return session_park(1,recovery_start);
+#endif
 }
 static int recover_rebuild(void *ctx)
 {
@@ -262,13 +287,43 @@ static int recover_rebuild(void *ctx)
  begin("worker_rebuilt",rc?44:0);field(" session=",generation);
  field(" rc=",rc?44:0);end();return rc;
 }
-static int recover_load(void *ctx) { ARG_UNUSED(ctx);return session_load(1,recovery_start); }
+static int recover_load(void *ctx)
+{
+ ARG_UNUSED(ctx);
+#if CONFIG_BES2700_M55_RECOVERY_FAIL_STEP == 3
+ begin("recovery_injected",0);field(" session=",generation);field(" step=",3);
+ field(" operation_rc=",13);field(" rc=",0);end();return 13;
+#else
+ return session_load(1,recovery_start);
+#endif
+}
 static int recover_release(void *ctx) { ARG_UNUSED(ctx);return session_release(1,recovery_start); }
-static int recover_run(void *ctx) { ARG_UNUSED(ctx);return session_finish(1,recovery_start); }
+static int recover_run(void *ctx)
+{
+ ARG_UNUSED(ctx);int rc=session_finish(1,recovery_start);
+#if CONFIG_BES2700_M55_RECOVERY_FAIL_STEP == 5
+ struct dual_status peer={0};bool readable=peer_read(&peer)==0;
+ bool expected=rc==16 && last_ready_fault==BES_PEER_READY_TIMEOUT && readable &&
+  !peer.beat && DUAL_TRACE->stage==BES_PEER_INJECTION_STAGE && DUAL_TRACE->reason==1;
+ begin("replacement_timeout",expected?0:47);field(" session=",generation);
+ field(" reason=",last_ready_fault);field(" readable=",readable);field(" beat=",peer.beat);
+ field(" trace_stage=",DUAL_TRACE->stage);field(" injection=",DUAL_TRACE->reason);
+ field(" rc=",expected?0:47);end();if(!expected) { return 47; }
+#endif
+ return rc;
+}
 #endif
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
 static int stop_local(void *ctx) { ARG_UNUSED(ctx);return q_isolate(); }
-static int hold_peer(void *ctx) { ARG_UNUSED(ctx);return reset_call(generation?generation-1:0,DUAL_STOP,41); }
+static int hold_peer(void *ctx)
+{
+ ARG_UNUSED(ctx);
+ if(generation==2 && !service(BES_LIFECYCLE_RESET_STATUS,0)) {
+  begin("hold_confirmed",0);field(" session=",generation);field(" reset_held=",1);
+  field(" rc=",0);end();return 0;
+ }
+ return reset_call(generation?generation-1:0,DUAL_STOP,41);
+}
 static int confirm_peer(void *ctx) { ARG_UNUSED(ctx);return service(BES_LIFECYCLE_RESET_STATUS,0); }
 static int clear_channel(void *ctx) { ARG_UNUSED(ctx);return bes2700_mbox_reset(mailbox); }
 
@@ -278,6 +333,18 @@ static int isolation_run(void)
  struct dual_status peer={0};struct bes_peer_health health;
  enum bes_peer_fault fault=BES_PEER_OK;
  if(!rc) {
+  uint32_t age=0;bool readable=false;
+  struct bes_peer_progress progress;bes_peer_progress_init(&progress,k_uptime_get());
+  struct q_report report={0};
+#if CONFIG_BES2700_M55_FAULT_CASE == 4
+  /* Complete real traffic first; then let the ordinary QUIESCE budget expire. */
+  int finish=session_finish(0,start);
+  fault=finish==20?BES_PEER_QUIESCE_TIMEOUT:BES_PEER_INVALID;
+  if(finish!=20) { rc=40; }
+  bes_peer_health_init(&health,k_uptime_get());
+  readable=peer_read(&peer)==0;health.beat=peer.beat;
+  age=k_uptime_get_32()-quiesce_started;q_snapshot(&report);
+#else
   fault=wait_ready(&health,&peer);
   if(!fault) {
    begin("ready",0);field(" round=",0);field(" session=",generation);
@@ -287,23 +354,51 @@ static int isolation_run(void)
    else {
     q_start();int64_t deadline=k_uptime_get()+BES_LIFECYCLE_READY_MS;
     while(!fault && !monitor_error && k_uptime_get()<deadline) {
-     k_msleep(BES_PEER_POLL_MS);
-     bool readable=peer_read(&peer)==0;
-     fault=bes_peer_health_poll(&health,k_uptime_get(),readable,
-                                readable && peer_ok(&peer),peer.beat);
+     k_msleep(BES_PEER_POLL_MS);readable=peer_read(&peer)==0;
+     fault=poll_health(&health,&peer,readable);q_snapshot(&report);
+#if CONFIG_BES2700_M55_FAULT_CASE == 3
+     if(!fault) {
+      bool pending=report.bth.sent>report.bth.acked || report.m55.sent>report.bth.handled;
+      fault=bes_peer_progress_poll(&progress,k_uptime_get(),pending,
+                                   report.bth.acked,report.bth.handled);
+     }
+#endif
     }
    }
   }
-  /* AXI shared diagnostics only, never peer DTCM. Injection is evidence,
+  age=(uint32_t)(k_uptime_get()-health.progress);
+#if CONFIG_BES2700_M55_FAULT_CASE == 3
+  age=(uint32_t)(k_uptime_get()-progress.progress);
+#endif
+#endif
+  /* Only AXI shared diagnostics; never peer DTCM. Injection is evidence,
    * not an input to the reusable health decision. */
   uint32_t stage=DUAL_TRACE->stage;__DMB();uint32_t injection=DUAL_TRACE->reason;
-  uint32_t age=(uint32_t)(k_uptime_get()-health.progress);
+#if CONFIG_BES2700_M55_FAULT_CASE >= 3
+  begin("fault_context",0);field(" session=",generation);field(" readable=",readable);
+  field(" peer_stage=",peer.stage);field(" peer_error=",peer.error);
+  field(" peer_seq=",readable?peer.seq:DUAL_STATUS->seq);field(" peer_beat=",peer.beat);
+  field(" heartbeat_age=",k_uptime_get()-health.progress);
+  field(" sent=",report.bth.sent);field(" acked=",report.bth.acked);
+  field(" handled=",report.bth.handled);field(" peer_sent=",report.m55.sent);
+  field(" quiesce=",BES_LIFECYCLE_CTL->quiesce);field(" idle=",BES_LIFECYCLE_CTL->idle);
+  field(" fatal_invoked=",BES_LIFECYCLE_CTL->unused[0]);field(" rc=",0);end();
+#endif
   begin("detected",0);field(" session=",generation);field(" reason=",fault);
   field(" age=",age);field(" beat=",health.beat);field(" trace_stage=",stage);
   field(" injection=",injection);field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
-  if(fault!=CONFIG_BES2700_M55_FAULT_CASE || stage!=BES_PEER_INJECTION_STAGE ||
-     injection!=CONFIG_BES2700_M55_FAULT_CASE || monitor_error) { rc=40; }
+  static const enum bes_peer_fault expected[]={BES_PEER_OK,BES_PEER_READY_TIMEOUT,
+   BES_PEER_HEARTBEAT_TIMEOUT,BES_PEER_IPC_TIMEOUT,BES_PEER_QUIESCE_TIMEOUT,
+   BES_PEER_FATAL,BES_PEER_HEARTBEAT_TIMEOUT};
+  bool marker=(stage==BES_PEER_INJECTION_STAGE && injection==CONFIG_BES2700_M55_FAULT_CASE);
+#if CONFIG_BES2700_M55_FAULT_CASE == 5
+  marker=stage==255 && peer.error==100+injection && BES_LIFECYCLE_CTL->unused[0]==5;
+#elif CONFIG_BES2700_M55_FAULT_CASE == 6
+  marker=!readable && (DUAL_STATUS->seq&1) && BES_LIFECYCLE_CTL->unused[0]==6;
+#endif
+  if(fault!=expected[CONFIG_BES2700_M55_FAULT_CASE] || !marker || monitor_error) { rc=40; }
  }
+
  /* Always attempt containment, including wrong injection/early failures.
   * No QUIESCE acknowledgement is required from the broken peer. */
  const struct bes_peer_isolation_ops ops={stop_local,hold_peer,confirm_peer,clear_channel};
@@ -335,12 +430,23 @@ static int isolation_run(void)
    rc=44;
    /* No second attempt, even if the peer reached READY before failing. */
    containment_rc=bes_peer_isolate(&ops,NULL,&contained);
-   begin("recovery_failed",rc);field(" session=",generation);
+   bool expected_failure=CONFIG_BES2700_M55_RECOVERY_FAIL_STEP &&
+    recovery.failed_step==CONFIG_BES2700_M55_RECOVERY_FAIL_STEP && !containment_rc &&
+    recovery.operation_rc==(recovery.failed_step==1?12:recovery.failed_step==3?13:16);
+   begin("recovery_failed",expected_failure?0:rc);field(" session=",generation);
    field(" step=",recovery.failed_step);field(" operation_rc=",(uint32_t)recovery.operation_rc);
    field(" local_idle=",contained.local_idle);field(" reset_held=",contained.reset_held);
    field(" channel_clean=",contained.channel_clean);field(" containment_rc=",(uint32_t)containment_rc);
-   field(" rc=",rc);end();
-  }
+   field(" rc=",expected_failure?0:rc);end();
+   /* Invoke the actual policy guard: no second hardware callback is allowed. */
+   uint32_t prior=releases;
+   int denied=bes_peer_recover(&recovery_ops,NULL,&contained,&recovery);
+   bool blocked=denied && recovery.attempts==1 && releases==prior;
+   begin("retry_blocked",blocked?0:45);field(" session=",generation);
+   field(" attempts=",recovery.attempts);field(" releases=",releases);
+   field(" blocked=",blocked);field(" rc=",blocked?0:45);end();
+   if(expected_failure && blocked) { rc=0; }
+  } else if(CONFIG_BES2700_M55_RECOVERY_FAIL_STEP) { rc=46; }
  }
 #endif
  /* Keep independent BTH liveness after both expected and unexpected faults. */
@@ -356,7 +462,7 @@ static int isolation_run(void)
   field(" rc=",held_bad?43:0);end();
  }
 #ifdef CONFIG_BES2700_M55_RECOVERY
- begin("recovery_result",rc);field(" pass=",!rc);field(" session=",generation);
+ begin(CONFIG_BES2700_M55_RECOVERY_FAIL_STEP?"recovery_failure_result":"recovery_result",rc);field(" pass=",!rc);field(" session=",generation);
  field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
  field(" attempts=",recovery.attempts);field(" recoveries=",recovery.completed);
 #else
@@ -415,7 +521,7 @@ int bes2700_lifecycle_validate(void)
   if(!rc && monitor_error) { rc=32; }
 #endif
  }
- k_timer_stop(&timer);k_thread_abort(r1_monitor);q_stop();
+ k_timer_stop(&timer);k_thread_abort(lifecycle_monitor);q_stop();
  if(rc && service) {
   /* Preserve failure evidence before the final attempt to hold CPU reset. */
   int snapshot_rc=service(DUAL_SNAPSHOT,DUAL_HW_ADDR);

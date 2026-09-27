@@ -31,7 +31,7 @@ BTH 当前的 Zephyr 移植使用 Cortex-M33 目标配置构建，其硬件处�
 |---|---|---|
 | 处理器与系统 | Cortex-M55、BTH STAR-MC1 | 已集成两个独立 Zephyr 内核，包含启动、共享内存消息和 mailbox 通知 |
 | M55 故障隔离 | 双核生命周期 | 可选 READY 超时/心跳停止注入场景；BTH 隔离 M55 并继续监测，不自动重载 |
-| M55 故障恢复 | 双核生命周期 | 可选单次恢复场景；重建 BTH worker、重载 M55 并验证新会话通信 |
+| M55 故障恢复 | 双核生命周期 | 可选单次恢复及失败隔离场景；覆盖启动、心跳、IPC、QUIESCE 和 fatal 故障，实板结论关联具体镜像 |
 | UART | UART 外设 | 已实现 BTH 轮询和中断驱动；默认未启用 Zephyr Serial/Console，日志通过 bootstrap 串口输出 |
 | 存储与 Flash | SRAM、封装内 Flash、启动 ROM | 已配置运行内存布局及 HAL 启动支持；尚未提供 Zephyr Flash 驱动 |
 | 蓝牙 | 双模 Bluetooth 5.3、LE Audio | 尚未接入 |

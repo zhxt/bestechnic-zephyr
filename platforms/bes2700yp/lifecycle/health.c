@@ -1,6 +1,22 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <bes2700_peer_health.h>
 
+void bes_peer_progress_init(struct bes_peer_progress *p, int64_t now)
+{
+ *p=(struct bes_peer_progress){.progress=now};
+}
+
+enum bes_peer_fault bes_peer_progress_poll(struct bes_peer_progress *p,
+ int64_t now, bool pending, uint32_t acked, uint32_t handled)
+{
+ if(now<p->progress || (uint32_t)(acked-p->acked)>=0x80000000U ||
+    (uint32_t)(handled-p->handled)>=0x80000000U) { return BES_PEER_INVALID; }
+ /* Late progress cannot conceal an already elapsed busy deadline. */
+ if(p->pending && now-p->progress>=BES_PEER_IPC_MS) { return BES_PEER_IPC_TIMEOUT; }
+ if(!pending || !p->pending || acked!=p->acked || handled!=p->handled) { p->progress=now; }
+ p->pending=pending;p->acked=acked;p->handled=handled;return BES_PEER_OK;
+}
+
 void bes_peer_health_init(struct bes_peer_health *h, int64_t now)
 {
  *h=(struct bes_peer_health){.state=BES_PEER_STARTING,.started=now,.progress=now};

@@ -6,13 +6,17 @@ import json
 from pathlib import Path
 import analyze_boot_profile as profile
 from analyze_dual_boot import prefix_contract
-from analyze_dual_restart import PREFIX, RESET_FIELDS, RESET_DIAGNOSTIC, LIFECYCLE
+from analyze_dual_restart import PREFIX, RESET_FIELDS, RESET_DIAGNOSTIC, LIFECYCLE, Restart
+from analyze_dual_message import FIELDS as ENDPOINT_FIELDS
 from validation_profiles import validate_manifest
+from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 FIELDS = {
     'isolation_begin': 'version layout build m55_build pair fault_case ready_ms heartbeat_ms duration rc',
     'event': 'round session step rc elapsed',
     'ready': 'round session peer_ms beat stack elapsed rc',
+    'peer': 'round session ms beat cycles elapsed stack guards rc',
+    'fault_context': 'session readable peer_stage peer_error peer_seq peer_beat heartbeat_age sent acked handled peer_sent quiesce idle fatal_invoked rc',
     'detected': 'session reason age beat trace_stage injection elapsed rc',
     'isolated': 'session local_idle reset_held channel_clean failed_step service_rc rc',
     'hardware': 'round session phase reset_clr ram_sel0 ram_sel1 core_vtor rc',
@@ -37,11 +41,12 @@ class Isolation:
             *[('stage', dict(stage=x)) for x in ('handoff', 'reset', 'early', 'main')],
         ]
         fixed = dict(isolation_version=1, ready_timeout_ms=5000,
-                     heartbeat_timeout_ms=1000, fault_poll_ms=20,
+                     heartbeat_timeout_ms=1000, ipc_timeout_ms=1000, fault_poll_ms=20,
                      injection_stage=6, injection_beats=10, restart_rounds=1 if terminal else 2,
                      dual_layout='0x000a0004', duration_seconds=600)
-        if (type(case) is not int or case not in (1, 2)
+        if (type(case) is not int or case not in FAULT_REASONS
                 or any(type(m.get(k)) is not type(v) or m[k] != v for k, v in fixed.items())
+                or m.get('lifecycle_log') != LOG_CONTRACT
                 or m.get('reset_diagnostic') != RESET_DIAGNOSTIC
                 or m.get('lifecycle') != LIFECYCLE):
             errors.append('manifest isolation contract')
@@ -95,9 +100,10 @@ class Isolation:
                     errors.append('late NA')
                 boot.append((kind, d))
                 continue
-            if namespace != 'zephyr_r1' or (module, context) != ('R1', 'MAIN') or ts == 'NA':
+            if namespace != LOG_NAMESPACE or (module, context) != (LOG_MODULE, 'MAIN') or ts == 'NA':
                 errors.append('isolation prefix')
-            wanted = RESET_FIELDS if kind == 'reset' else set(FIELDS.get(kind, '').split())
+            wanted = (RESET_FIELDS if kind == 'reset' else ENDPOINT_FIELDS | {'round', 'side'}
+                      if kind == 'endpoint' else set(FIELDS.get(kind, '').split()))
             if not wanted or set(d) != wanted:
                 errors.append('isolation fields: ' + kind)
                 continue
@@ -122,8 +128,12 @@ class Isolation:
                     ended = True
         expected = [('isolation_begin', None), ('event', 1), ('event', 2),
                     ('event', 3), ('reset', 3), ('event', 4)]
-        if case == 2:
+        if case != 1:
             expected.append(('ready', None))
+        if case == 4:
+            expected += [('endpoint', None), ('endpoint', None), ('peer', None), ('event', 5)]
+        if case >= 3:
+            expected.append(('fault_context', None))
         expected += [('detected', None), ('reset', 4), ('isolated', None),
                      ('hardware', None)]
         if terminal:
@@ -164,15 +174,60 @@ class Isolation:
                     errors.append('READY evidence')
             elif k == 'detected':
                 detected = now
-                limit = 5000 if case == 1 else 1000
-                if (d['reason'] != case or d['injection'] != case or d['trace_stage'] != 6
-                        or not limit <= d['age'] <= limit + 100
-                        or (case == 1 and d['beat'] != 0)
-                        or (case == 2 and d['beat'] != 10)
-                        or origin is None or abs(now - origin - d['elapsed']) > 30
-                        or release is None
-                        or not (5000 if case == 1 else 1800) <= now - release <= (5200 if case == 1 else 2200)):
-                    errors.append('fault detection/injection/deadline')
+                if (d['reason'] != FAULT_REASONS[case] or origin is None
+                        or abs(now - origin - d['elapsed']) > 40 or release is None):
+                    errors.append('fault detection identity/time')
+                if case in (1, 2):
+                    limit = 5000 if case == 1 else 1000
+                    if (d['injection'] != case or d['trace_stage'] != 6
+                            or not limit <= d['age'] <= limit + 100
+                            or d['beat'] != (0 if case == 1 else 10)
+                            or release is None
+                            or not (5000 if case == 1 else 1800) <= now-release <= (5200 if case == 1 else 2200)):
+                        errors.append('fault detection/injection/deadline')
+                else:
+                    contexts=[x['fields'] for x in rows if x['kind']=='fault_context']
+                    context=contexts[0] if len(contexts)==1 else {}
+                    if not context:
+                        errors.append('fault context missing')
+                        continue
+                    if any(value>0xffffffff for value in context.values()):
+                        errors.append('fault context width')
+                    if case in (3,4):
+                        limit=1000 if case==3 else 5000
+                        if (d['injection']!=case or d['trace_stage']!=6 or not limit<=d['age']<=limit+100
+                                or context['readable']!=1 or context['peer_stage']!=2 or context['peer_error']
+                                or context['peer_seq']&1 or context['peer_beat']!=d['beat']
+                                or context['fatal_invoked']):
+                            errors.append('live heartbeat fault evidence')
+                        if case==3 and (context['heartbeat_age']>=1000 or
+                                not (context['sent']>context['acked'] or context['peer_sent']>context['handled'])
+                                or context['acked']<32 or context['sent']-context['acked']>16
+                                or context['quiesce'] or context['idle']):
+                            errors.append('IPC pending/progress evidence')
+                        if case==4 and (context['quiesce']!=1 or context['idle']!=0
+                                or any(context[x]!=1000 for x in ('sent','acked','handled','peer_sent'))):
+                            errors.append('QUIESCE timeout evidence')
+                        if case==4:
+                            stop=next((x for x in rows if x['kind']=='event' and x['fields']['step']==5),None)
+                            previous=next((x for x in rows if x['kind']=='ready'),None)
+                            if (not stop or not previous or not 5000<=now-stop['time']<=5100
+                                    or context['peer_beat']<=previous['fields']['beat']+40):
+                                errors.append('QUIESCE deadline/heartbeat evidence')
+                    elif case==5:
+                        if (context['readable']!=1 or context['peer_stage']!=255
+                                or context['peer_error']!=104 or context['fatal_invoked']!=5
+                                or context['peer_seq']&1 or d['trace_stage']!=255 or d['injection']!=4
+                                or not 0<=d['age']<=200):
+                            errors.append('fatal publication evidence')
+                    elif case==6:
+                        if (context['readable']!=0 or not context['peer_seq']&1
+                                or context['fatal_invoked']!=6 or d['beat']!=10
+                                or not 1000<=d['age']<=1100 or abs(context['heartbeat_age']-d['age'])>40
+                                or d['trace_stage']!=5 or d['injection']!=0):
+                            errors.append('unreadable fatal fallback evidence')
+                    if release is None or not 1000<=now-release<=12000:
+                        errors.append('extended fault deadline')
             elif k == 'reset':
                 if (any(v > 0xffffffff for v in d.values()) or d['version'] != 1
                         or any(d[x] for x in ('reason', 'service_rc', 'diag_error', 'primask', 'rc'))
@@ -199,11 +254,25 @@ class Isolation:
                         or len(samples) != 601 or now < samples[-1]['time']):
                     errors.append('final reset/channel evidence')
             elif k == 'isolation_result':
-                if (d != {'pass': 1, 'session': 1, 'reason': case,
+                if (d != {'pass': 1, 'session': 1, 'reason': FAULT_REASONS[case],
                         'samples': 601, 'releases': 1, 'recoveries': 0, 'rc': 0}):
                     errors.append('final result')
                 if missing or len(samples) != 601 or now < samples[-1]['time']:
                     errors.append('early final result')
+        if case==4:
+            # Validate real pre-QUIESCE traffic without inventing a shutdown.
+            initial=[]
+            for line in lines:
+                if 'zephyr_lifecycle ' not in line:
+                    continue
+                body=line.split('zephyr_lifecycle ',1)[1]
+                if body.startswith(('event ', 'reset ', 'ready ', 'endpoint ', 'peer ')):
+                    if body.startswith('reset ') and 'op=4 ' in body:
+                        break
+                    initial.append(line)
+            pre=Restart.analyze('\n'.join(initial),m,continuation=True,round_start=0,end_step=5)['sessions'][0]
+            errors.extend('before QUIESCE: '+x for x in pre['errors'])
+            missing.extend('before QUIESCE: '+x for x in pre['missing'])
         status = 'fail' if errors else 'incomplete' if missing else 'pass'
         session = dict(status=status, errors=errors, missing=missing, records=rows, samples=samples)
         return dict(status=status, session_count=1, sessions=[session])

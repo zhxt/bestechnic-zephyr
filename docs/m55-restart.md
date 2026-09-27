@@ -33,7 +33,7 @@ The first board check should confirm that session 2 starts after the first
 M55 stop. After one complete 11-session and 600-second run, repeat with two
 independent physical power cycles. Rerun affected message profiles when shared
 startup, mailbox or worker behavior changes. The result belongs to the exact
-image SHA256 and package; previous R1 hardware reports do not validate this
+image SHA256 and package; previous firmware hardware reports do not validate this
 new candidate.
 
 ## Lifecycle ownership
@@ -191,8 +191,8 @@ A failure in REPARK, worker recreation, loading, release, READY or traffic
 prevents later recovery operations. The manager attempts containment again,
 records the failed step and containment outcome, and keeps BTH monitoring.
 There is no second reload attempt. Failed reset confirmation must not be reported
-as reset-held. IPC progress stalls, QUIESCE-timeout and fatal-specific injection
-profiles, repeated recovery and BTH/global-reset recovery are separate work.
+as reset-held. Additional fault and recovery-failure profiles are described
+below. Repeated recovery and BTH/global-reset recovery remain separate work.
 
 Build with the chosen profile and use the matching package:
 
@@ -215,3 +215,45 @@ and the affected shared-path regressions. Host models test aborting the actual
 worker during traffic, recreating it with stale local signals, session isolation,
 one-attempt and failure gates, and parser rejection cases; register timing and
 physical recovery still require board evidence tied to the image SHA256.
+
+## Extended fault and recovery-failure profiles
+
+All profiles below are optional validation applications. Use the same sysbuild
+selection and packaged `analyze_dual_recovery.py` command as above. They do not
+change the default profile or enable recovery in a business application.
+
+| Profile | Injected fault | Required outcome |
+|---|---|---|
+| `m55-ipc-stall-recovery` | M55 worker sleeps after consuming at least 32 messages; heartbeat stays alive | Outstanding requests stop progressing for 1,000 ms; reason=4, then recover session 2 |
+| `m55-quiesce-recovery` | Session 1 completes traffic but withholds its idle acknowledgment | QUIESCE expires after 5,000 ms with advancing heartbeat; reason=5, then recover |
+| `m55-fatal-recovery` | Session 1 calls `k_panic()` after ten heartbeats | Readable fatal publication, reason=6, then recover |
+| `m55-fatal-unreadable-recovery` | Same panic, but the fatal handler leaves the status sequence odd | Unreadable status does not refresh heartbeat; reason=2 timeout, then recover |
+| `m55-repark-failure` | After heartbeat isolation, reject REPARK before its hardware operation | Reconfirm reset, reject a second attempt; one RELEASE, zero recoveries |
+| `m55-load-failure` | After REPARK and worker recreation, reject loading before RAM writes | Re-isolate, reject a second attempt; one RELEASE, zero recoveries |
+| `m55-recovery-ready-failure` | Replacement M55 stops before READY | Second READY timeout, re-isolation, rejected retry; two RELEASEs, zero recoveries |
+
+The IPC watchdog tracks acknowledgments and consumed messages only while there
+are outstanding requests. Idle traffic does not arm it. The worker publishes
+live progress through a BTH-owned locked report; the manager does not copy its
+mutable state unsynchronized. A late update cannot clear an expired deadline.
+Fault selection and injection markers are evidence, not inputs to health policy.
+The M55-owned `unused[0]` control word records the validation pre-panic marker;
+no control-block size or shared ABI number changes. An absent fatal publication
+can establish only heartbeat timeout, not a decoded exception cause.
+
+The REPARK/load failure profiles inject a software operation error. They do not
+corrupt hardware selectors or prove recovery from a physical RAM/readback fault.
+Actual reset-service errors and failed mapping gates remain covered by host
+models and offline checks, with hardware failures requiring separate evidence.
+Any unexpected containment failure remains a failing run; BTH liveness alone
+cannot turn it into success. Failure profiles require `recovery_failed`,
+`retry_blocked`, final held/channel checks and
+`recovery_failure_result pass=1 attempts=1 recoveries=0`. This means the
+expected failure was contained, not that M55 recovered. They cannot pass through
+the successful-recovery result path. Both outcomes still require 601 samples
+and the full 600-second BTH observation; no shorter acceptance scope is enabled.
+
+Lifecycle records use `BTH/LIFECYCLE/MAIN` and `zephyr_lifecycle`; package
+`lifecycle_log` declares text format version 2. Normal-restart protocol version 4
+and the shared-memory ABI are unchanged. Keep old logs with their original
+package analyzer; mixed namespaces are rejected by the current analyzer.

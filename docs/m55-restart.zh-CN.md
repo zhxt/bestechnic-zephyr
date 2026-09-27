@@ -40,7 +40,7 @@ reset 是单独操作，只能由持有本地访问者和对端 CPU 状态的管
 复位读回失败进入 FAULT，禁止 REPARK；通道清理失败保持禁发并拒绝 resume。
 READY/消息/QUIESCE 预算分别为 5/30/5 秒。错误立即记录并终止测试。
 
-`zephyr_r1` 日志 version=4、共享 ABI 为 `0x000a0004`。复位等待和独立采样函数均放在 bootstrap
+`zephyr_lifecycle` 正常重启协议 version=4、共享 ABI 为 `0x000a0004`。复位等待和独立采样函数均放在 bootstrap
 SRAM，采样禁止内联，连续两次读 timer 的短临界区保存/恢复 PRIMASK。保留原先
 `a>=b && a-b<=20` 判据，每次采样最多尝试 32 次；只有这两次读取屏蔽普通中断。
 10 ms 从首次有效采样计至确认 reset 的采样，包含 HAL stop 操作；首次采样自身由
@@ -177,7 +177,7 @@ QUIESCE/复位/通道清理。随后 M55 保持复位，BTH 从监测开始累�
 
 REPARK、worker 重建、装载、释放、READY 或通信任一步失败，都禁止后续恢复步骤。
 管理器再次尝试隔离，记录失败步骤和隔离结果，BTH 继续监测，不进行第二次重载。
-复位确认失败不能记作保持复位成功。IPC 停滞、QUIESCE 超时、fatal 专用注入场景、
+复位确认失败不能记作保持复位成功。更多故障与恢复失败场景见下节。
 多次恢复以及 BTH/整机复位恢复留在后续批次。
 
 按对应场景构建，使用完整匹配包的分析器：
@@ -198,3 +198,36 @@ BTH sample 后，才允许 `recovery_result pass=1 session=2 releases=2 attempts
 物理断电启动和受影响的公共路径回归。主机模型覆盖真实 worker 通信中途终止、带残留
 信号的重建、新会话隔离、单次预算及失败门控、解析器负例；实际寄存器时序和恢复能力
 仍须使用关联镜像 SHA256 的实板证据确认。
+
+## 扩展故障及恢复失败场景
+
+以下均为可选验证应用，沿用上述 sysbuild 场景选择及同包 `analyze_dual_recovery.py`
+命令，不改变默认场景，也不自动为业务应用启用恢复。
+
+| 场景 | 注入行为 | 必须达到的结果 |
+|---|---|---|
+| `m55-ipc-stall-recovery` | M55 worker 消费至少 32 条消息后休眠，心跳继续 | 有未完成请求且 1000 ms 无消息进度；reason=4，恢复 session 2 |
+| `m55-quiesce-recovery` | session 1 完成通信，但拒绝 idle 确认 | 心跳继续，QUIESCE 等待 5000 ms 超时；reason=5，随后恢复 |
+| `m55-fatal-recovery` | session 1 在十次心跳后调用 `k_panic()` | 读取有效 fatal 发布，reason=6，随后恢复 |
+| `m55-fatal-unreadable-recovery` | 同样触发 panic，fatal handler 将状态序号留在奇数 | 不可读状态不刷新心跳期限；reason=2 超时，随后恢复 |
+| `m55-repark-failure` | 心跳停止隔离后，在硬件操作前拒绝 REPARK | 再次确认复位，拒绝第二次尝试；一次 RELEASE、零次恢复 |
+| `m55-load-failure` | REPARK、worker 重建后，在写 RAM 前拒绝装载 | 再次隔离、拒绝第二次尝试；一次 RELEASE、零次恢复 |
+| `m55-recovery-ready-failure` | 新 M55 在 READY 前停止 | 新会话 READY 超时，再次隔离并拒绝重试；两次 RELEASE、零次恢复 |
+
+IPC watchdog 仅在确有未完成请求时监测 ACK 和消费计数；空闲不启动超时。
+worker 通过 BTH 本地带锁报告发布实时进度，管理器不直接无锁复制线程可变状态。
+迟到的进度不能解除已到期的期限。注入选项和标记只用于验收，不参与健康策略判定。
+M55 所有的控制字 `unused[0]` 记录验证用的 panic 前标记；控制区尺寸和共享 ABI 数值不变。
+fatal 发布缺失时只能确认心跳超时，不能声称已解析具体异常原因。
+
+REPARK/装载失败场景注入的是软件操作错误，不会破坏硬件 selector，也不能据此声明
+真实 RAM/读回故障已经完成实板验收。复位服务错误及映射失败门控仍由主机模型和离线
+检查覆盖；真实硬件失败需另有证据。意外隔离失败仍判为失败，BTH 存活不能代替成功隔离。
+失败场景要求 `recovery_failed`、`retry_blocked`、最终 held/通道检查，以及
+`recovery_failure_result pass=1 attempts=1 recoveries=0`。这里的通过表示预期失败已被
+正确隔离，不表示 M55 恢复成功；不能使用成功恢复的结果行替代。
+两类结果都仍要求 601 条样本及完整 600 秒 BTH 观察，本批不启用缩短验收范围。
+
+生命周期日志采用 `BTH/LIFECYCLE/MAIN` 和 `zephyr_lifecycle`，包内 `lifecycle_log`
+声明文本格式 version=2；正常重启协议 version=4 及共享内存 ABI 保持不变。
+历史日志保留原包分析器，新分析器拒绝混用旧、新命名空间。

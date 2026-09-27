@@ -70,6 +70,13 @@
 | m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 600 秒 |
 | m55-ready-recovery | READY 超时隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
 | m55-heartbeat-recovery | 心跳停止隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
+| `m55-ipc-stall-recovery` | 心跳正常、IPC 进度停止后恢复 | 600 秒 |
+| `m55-quiesce-recovery` | QUIESCE 超时后恢复 | 600 秒 |
+| `m55-fatal-recovery` | 有效 fatal 发布后恢复 | 600 秒 |
+| `m55-fatal-unreadable-recovery` | fatal 发布不可读，心跳超时后恢复 | 600 秒 |
+| `m55-repark-failure` | REPARK 前拒绝操作，保持隔离且禁止重试 | 600 秒 |
+| `m55-load-failure` | 装载前拒绝操作，保持隔离且禁止重试 | 600 秒 |
+| `m55-recovery-ready-failure` | 新会话 READY 超时，保持隔离且禁止重试 | 600 秒 |
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
 

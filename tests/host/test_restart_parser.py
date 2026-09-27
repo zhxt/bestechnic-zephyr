@@ -4,7 +4,8 @@ from analyze_dual_restart import analyze
 from test_message_parser import fixture as q_fixture,manifest as q_manifest
 
 def manifest():
-    return dict(q_manifest('ipc-sequential'),validation_profile='m55-restart',restart_version=4,restart_rounds=11,
+    from analyze_lifecycle_contract import LOG_CONTRACT
+    return dict(q_manifest('ipc-sequential'),validation_profile='m55-restart',restart_version=4,restart_rounds=11,lifecycle_log=LOG_CONTRACT,
                 restart_target=1000,dual_layout='0x000a0004',reset_sampler=0x00502001,
                 reset_diagnostic=dict(version=1,address=0x2055c1a0,bytes=80,read_attempts=32,poll_limit=1024),
                 repark_diagnostic=dict(version=1,address=0x2055c800,bytes=100,bank=9,selector_mask=7<<27,
@@ -19,7 +20,7 @@ def fixture(m=None):
     boot=[l for l in q_fixture(m).splitlines() if 'zephyr_bth ' in l or 'zephyr_bootprof ' in l]
     rows=[]
     def row(time,kind,**fields):
-        rows.append((time,f'{time}/I/BTH/R1/MAIN | zephyr_r1 {kind} '+' '.join(f'{k}={v}' for k,v in fields.items())+' !'))
+        rows.append((time,f'{time}/I/BTH/LIFECYCLE/MAIN | zephyr_lifecycle {kind} '+' '.join(f'{k}={v}' for k,v in fields.items())+' !'))
     row(1999,'begin',version=4,layout=0xa0004,build=int(m['build'],0),m55_build=int(m['m55_build'],0),pair=m['message_pair'],rounds=11,restarts=10,target=1000,duration=600,rc=0)
     for n in range(11):
         base=2100+n*5000
@@ -56,8 +57,8 @@ def fixture(m=None):
 class RestartParser(unittest.TestCase):
     def test_entry_diagnostic_cannot_be_accepted_as_success(self):
         text=fixture();m=manifest()
-        line='1999/E/BTH/R1/MAIN | zephyr_r1 precheck dispatch=872437209 service_layout=655364 service_errors=8 state_errors=0 rc=1 !\n'
-        position=text.index('2000/I/BTH/R1')
+        line='1999/E/BTH/LIFECYCLE/MAIN | zephyr_lifecycle precheck dispatch=872437209 service_layout=655364 service_errors=8 state_errors=0 rc=1 !\n'
+        position=text.index('2000/I/BTH/LIFECYCLE')
         r=analyze(text[:position]+line+text[position:],m)
         self.assertEqual(r['status'],'fail')
         self.assertTrue(any(record['kind']=='precheck' for record in r['sessions'][0]['records']))
@@ -65,8 +66,8 @@ class RestartParser(unittest.TestCase):
     def test_complete_and_incomplete(self):
         m=manifest();text=fixture(m);r=analyze(text,m)
         self.assertEqual(r['status'],'pass',r)
-        self.assertEqual(analyze(text[:text.index('10000/I/BTH/R1')],m)['status'],'incomplete')
-        self.assertEqual(analyze(text+text[:text.index('10000/I/BTH/R1')],m)['status'],'incomplete')
+        self.assertEqual(analyze(text[:text.index('10000/I/BTH/LIFECYCLE')],m)['status'],'incomplete')
+        self.assertEqual(analyze(text+text[:text.index('10000/I/BTH/LIFECYCLE')],m)['status'],'incomplete')
         self.assertEqual(analyze(text[:-20],m)['status'],'incomplete')
 
     def test_faults_and_missing_evidence(self):
@@ -77,12 +78,12 @@ class RestartParser(unittest.TestCase):
             ('session=2','session=1'),('acked=1000','acked=999'),('handled=1000','handled=999'),
             ('len3=1','len3=0'),('phase=6','phase=5'),('error=0 guard=2445761077','error=10 guard=2445761077'),
             ('kicks=130','kicks=129'),('guards=1','guards=0'),('step=7','step=8'),
-            ('/I/BTH/R1/MAIN','/I/BTH/IPC/MAIN'),('NA/I/BTH/BOOT/EARLY | ','')]
+            ('/I/BTH/LIFECYCLE/MAIN','/I/BTH/IPC/MAIN'),('NA/I/BTH/BOOT/EARLY | ','')]
         for old,new in replacements:
             with self.subTest(old=old):
                 self.assertIn(old,text);self.assertEqual(analyze(text.replace(old,new,1),m)['status'],'fail')
         lines=text.splitlines()
-        for token in ('zephyr_r1 ready round=3','zephyr_r1 session round=9','zephyr_r1 sample id=500'):
+        for token in ('zephyr_lifecycle ready round=3','zephyr_lifecycle session round=9','zephyr_lifecycle sample id=500'):
             self.assertEqual(analyze('\n'.join(l for l in lines if token not in l)+'\n',m)['status'],'fail')
         self.assertEqual(analyze(q_fixture(),m)['status'],'fail')
 
@@ -101,7 +102,7 @@ class RestartParser(unittest.TestCase):
 
     def test_repark_mapping_and_readback(self):
         text=fixture();m=manifest()
-        line=next(l for l in text.splitlines() if 'zephyr_r1 repark round=1 ' in l)
+        line=next(l for l in text.splitlines() if 'zephyr_lifecycle repark round=1 ' in l)
         for key in ('version','op','service_rc','phase_before','phase_after','reason',
                     'reset_before','reset_after','sel0_before','sel1_before','sel0_axi',
                     'sel1_axi','sel0_after','sel1_after','phys0','phys1','phys2',
@@ -127,12 +128,12 @@ class RestartParser(unittest.TestCase):
                 self.assertIn(old,text)
                 self.assertEqual(analyze(text.replace(old,new,1),m)['status'],'fail')
         lines=text.splitlines()
-        self.assertEqual(analyze('\n'.join(l for l in lines if 'zephyr_r1 reset round=2' not in l)+'\n',m)['status'],'fail')
+        self.assertEqual(analyze('\n'.join(l for l in lines if 'zephyr_lifecycle reset round=2' not in l)+'\n',m)['status'],'fail')
 
     def test_each_missing_field_fails_without_crash(self):
         text=fixture();m=manifest();lines=text.splitlines()
         for kind in ('event','reset','repark','ready','endpoint','peer','hardware','session','sample','result'):
-            line=next(x for x in lines if 'zephyr_r1 '+kind+' ' in x)
+            line=next(x for x in lines if 'zephyr_lifecycle '+kind+' ' in x)
             prefix,body=line.split(' | ',1)
             parts=body.split()
             for i in range(2,len(parts)-1):

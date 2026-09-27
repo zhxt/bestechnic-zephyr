@@ -25,7 +25,7 @@ The integration implements dual-core startup, basic kernel operation, and inter-
 |---|---|---|
 | Processors | Cortex-M55 and BTH STAR-MC1 | Two independent Zephyr kernels, startup, shared-memory messages, and mailbox notifications |
 | M55 fault isolation | Dual-core lifecycle | Optional READY-timeout/heartbeat-stop profiles; BTH isolates M55 and continues monitoring without reload |
-| M55 fault recovery | Dual-core lifecycle | Optional one-attempt recovery profiles; recreate the BTH worker, reload M55 and verify a new message session |
+| M55 fault recovery | Dual-core lifecycle | Optional recovery and failure-containment profiles for startup, heartbeat, IPC, QUIESCE and fatal faults; board results are image-specific |
 | UART | UART peripherals | BTH polling and interrupt driver implemented; Zephyr Serial/Console disabled by default; bootstrap UART carries logs |
 | Memory and flash | SRAM, in-package flash, boot ROM | Runtime layout and HAL startup support; no Zephyr flash driver |
 | Bluetooth | Dual-mode Bluetooth 5.3 and LE Audio | Not integrated |

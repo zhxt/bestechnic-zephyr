@@ -66,6 +66,13 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 | `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | 600 s |
 | `m55-ready-recovery` | READY timeout, isolation and one new session with 1,000 messages each way | 600 s |
 | `m55-heartbeat-recovery` | Heartbeat stop, isolation and one new session with 1,000 messages each way | 600 s |
+| `m55-ipc-stall-recovery` | Recover stalled IPC with a live heartbeat | 600 s |
+| `m55-quiesce-recovery` | Recover after a QUIESCE timeout | 600 s |
+| `m55-fatal-recovery` | Recover a readable fatal publication | 600 s |
+| `m55-fatal-unreadable-recovery` | Recover heartbeat timeout after a lost fatal publication | 600 s |
+| `m55-repark-failure` | Reject REPARK, remain isolated, deny retry | 600 s |
+| `m55-load-failure` | Reject loading, remain isolated, deny retry | 600 s |
+| `m55-recovery-ready-failure` | Replacement READY timeout, containment and denied retry | 600 s |
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
 

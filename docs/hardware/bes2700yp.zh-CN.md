@@ -125,3 +125,5 @@ BTH 区域由 [BTH DTS](../../bsp/dts/arm/bestechnic/bes2700yp_bth.dtsi)和[启�
 表中代码区位于运行内存，由启动流程装载；板级 DTS 中的 `zephyr,flash` 选择用于链接布局，不能据此将这些区域当成物理 Flash。表格未列出全部启动、诊断和服务保留区，完整分配以实际构建生成的 DTS、链接结果和 `release/offline-validation.json` 为准，相关检查见[离线审计范围](../architecture.zh-CN.md#离线审计范围)。
 
 以上均为运行地址，不能直接作为刷写地址。
+
+扩展场景包括 IPC 停滞、QUIESCE 超时、fatal 发布可读/缺失及恢复操作失败；见[扩展故障契约](../m55-restart.zh-CN.md#扩展故障及恢复失败场景)。软件注入失败不等于真实硬件故障验收。

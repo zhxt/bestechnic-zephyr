@@ -6,6 +6,7 @@
 
 #define BES_PEER_READY_MS 5000U
 #define BES_PEER_HEARTBEAT_MS 1000U
+#define BES_PEER_IPC_MS 1000U
 #define BES_PEER_POLL_MS 20U
 #define BES_PEER_INJECTION_STAGE 6U
 #define BES_PEER_INJECTION_BEATS 10U
@@ -13,7 +14,7 @@
 enum bes_peer_state { BES_PEER_STARTING, BES_PEER_RUNNING, BES_PEER_FAULT };
 enum bes_peer_fault {
  BES_PEER_OK, BES_PEER_READY_TIMEOUT, BES_PEER_HEARTBEAT_TIMEOUT,
- BES_PEER_INVALID,
+ BES_PEER_INVALID, BES_PEER_IPC_TIMEOUT, BES_PEER_QUIESCE_TIMEOUT, BES_PEER_FATAL,
 };
 /* BTH-owned state; independent of Zephyr, HAL and fault-injection selection. */
 struct bes_peer_health {
@@ -25,6 +26,15 @@ struct bes_peer_health {
 void bes_peer_health_init(struct bes_peer_health *health, int64_t now);
 enum bes_peer_fault bes_peer_health_poll(struct bes_peer_health *health,
  int64_t now, bool readable, bool valid, uint32_t beat);
+/* A busy watchdog is armed only while real requests are outstanding. */
+struct bes_peer_progress {
+ int64_t progress;
+ uint32_t acked, handled;
+ bool pending;
+};
+void bes_peer_progress_init(struct bes_peer_progress *p, int64_t now);
+enum bes_peer_fault bes_peer_progress_poll(struct bes_peer_progress *p,
+ int64_t now, bool pending, uint32_t acked, uint32_t handled);
 
 /* Each operation is synchronous and bounded. A failure stops the sequence.
  * No reload, shared-memory reinitialization or CPU release is possible here. */

@@ -16,6 +16,10 @@
 #ifdef CONFIG_BES2700_M55_RESTART
 #include <bes2700_lifecycle.h>
 #define Q_TARGET BES_LIFECYCLE_TARGET
+#if !defined(CC_BTH) && CONFIG_BES2700_M55_FAULT_CASE == 3
+static volatile uint32_t fault_injected;
+int q_fault_injected(void) { return fault_injected; }
+#endif
 static volatile uint32_t worker_idle;
 int q_idle(void) { __DMB();return worker_idle; }
 #ifdef CC_BTH
@@ -266,7 +270,13 @@ static int run_stage(unsigned stage,unsigned direction,uint32_t target)
   }
   own.elapsed=(uint32_t)(now-active_start);
   if(now-reported>=1000 && (rc=stats())) { return rc; }
-  if(changed) { publish();if((rc=notify())) { return rc; } }
+  if(changed) { publish();update_report(0,0);if((rc=notify())) { return rc; } }
+#if !defined(CC_BTH) && CONFIG_BES2700_M55_FAULT_CASE == 3
+  if(own.session==1 && own.handled>=32) {
+   /* Stop only the worker; heartbeat thread and interrupts remain alive. */
+   fault_injected=1;__DMB();k_sleep(K_FOREVER);
+  }
+#endif
   if(now-reported>=1000) { publish();update_report(0,0);reported=now; }
   if(own.phase==Q_STOPPING && other.stage==stage && other.phase>=Q_STOPPING &&
      own.sent==own.acked && own.handled==other.sent && IN->head==IN->tail && OUT->head==OUT->tail) {

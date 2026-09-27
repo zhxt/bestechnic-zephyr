@@ -11,6 +11,30 @@ static int run(void *p) { (void)p;return operation(5); }
 int main(void)
 {
  struct bes_peer_health h;
+ struct bes_peer_progress p;
+ bes_peer_progress_init(&p,0);
+ /* No pending request: idle forever, even with stationary counters. */
+ for(unsigned t=0;t<100000;t+=100) {
+  assert(bes_peer_progress_poll(&p,t,false,0,0)==BES_PEER_OK);
+ }
+ assert(!bes_peer_progress_poll(&p,100000,true,0,0));
+ assert(!bes_peer_progress_poll(&p,100999,true,0,0));
+ assert(bes_peer_progress_poll(&p,101000,true,1,0)==BES_PEER_IPC_TIMEOUT);
+ /* Progress in either lane refreshes a busy budget before its deadline. */
+ bes_peer_progress_init(&p,0);
+ assert(!bes_peer_progress_poll(&p,0,true,0,0));
+ assert(!bes_peer_progress_poll(&p,999,true,1,0));
+ assert(!bes_peer_progress_poll(&p,1998,true,1,1));
+ assert(!bes_peer_progress_poll(&p,2997,false,1,1));
+ assert(!bes_peer_progress_poll(&p,5000,false,1,1));
+ assert(!bes_peer_progress_poll(&p,9000,true,1,1));
+ assert(bes_peer_progress_poll(&p,10000,true,1,1)==BES_PEER_IPC_TIMEOUT);
+ bes_peer_progress_init(&p,100);
+ assert(bes_peer_progress_poll(&p,99,false,0,0)==BES_PEER_INVALID);
+ bes_peer_progress_init(&p,0);
+ assert(!bes_peer_progress_poll(&p,0,true,3,4));
+ assert(bes_peer_progress_poll(&p,1,true,2,4)==BES_PEER_INVALID);
+
  /* No READY, including a permanently odd/unreadable publication. */
  bes_peer_health_init(&h,100);
  assert(!bes_peer_health_poll(&h,5099,false,false,0));

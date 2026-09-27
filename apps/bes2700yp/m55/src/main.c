@@ -28,6 +28,12 @@ static void publish(uint32_t stage, uint32_t error, size_t stack, uint32_t ms)
 }
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 {
+#if CONFIG_BES2700_M55_FAULT_CASE == 6
+ /* Exercise loss of a fatal publication, including a writer left odd. */
+ if (BES_LIFECYCLE_CTL->session==1) {
+  dual_shared.seq |= 1U;__DSB();__disable_irq();for (;;) { __NOP(); }
+ }
+#endif
  if (esf) {
   DUAL_TRACE->pc=esf->basic.pc; DUAL_TRACE->lr=esf->basic.lr;
   DUAL_TRACE->xpsr=esf->basic.xpsr; DUAL_TRACE->esf_valid=1;
@@ -43,6 +49,15 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
 #if !defined(CONFIG_BES2700_M55_RESTART)
 #error "M55 fault injection requires lifecycle support"
 #endif
+#if CONFIG_BES2700_M55_FAULT_CASE == 3 || CONFIG_BES2700_M55_FAULT_CASE == 4
+static bool first_session(void)
+{
+ return BES_LIFECYCLE_CTL->magic==BES_LIFECYCLE_MAGIC &&
+  BES_LIFECYCLE_CTL->layout==BES_LIFECYCLE_LAYOUT &&
+  BES_LIFECYCLE_CTL->guard==BES_LIFECYCLE_GUARD && BES_LIFECYCLE_CTL->session==1;
+}
+#endif
+#if CONFIG_BES2700_M55_FAULT_CASE != 3 && CONFIG_BES2700_M55_FAULT_CASE != 4
 static void inject_fault(void)
 {
 #ifdef CONFIG_BES2700_M55_RECOVERY
@@ -53,10 +68,15 @@ static void inject_fault(void)
      BES_LIFECYCLE_CTL->guard==BES_LIFECYCLE_GUARD &&
      BES_LIFECYCLE_CTL->session==2) { return; }
 #endif
+#if CONFIG_BES2700_M55_FAULT_CASE == 5 || CONFIG_BES2700_M55_FAULT_CASE == 6
+ BES_LIFECYCLE_CTL->unused[0]=CONFIG_BES2700_M55_FAULT_CASE;__DSB();
+ k_panic();
+#endif
  __disable_irq();
  dual_trace_record(BES_PEER_INJECTION_STAGE,CONFIG_BES2700_M55_FAULT_CASE);
  for (;;) { __NOP(); }
 }
+#endif
 #endif
 int main(void)
 {
@@ -67,6 +87,12 @@ int main(void)
 #if CONFIG_BES2700_M55_FAULT_CASE == 1
  inject_fault();
 #endif
+#if CONFIG_BES2700_M55_RECOVERY_FAIL_STEP == 5
+ if(BES_LIFECYCLE_CTL->session==2) {
+  __disable_irq();dual_trace_record(BES_PEER_INJECTION_STAGE,1);
+  for(;;) { __NOP(); }
+ }
+#endif
  int64_t deadline = k_uptime_get();
  for (;;) {
 #ifdef CONFIG_BES2700_M55_RESTART
@@ -74,7 +100,7 @@ int main(void)
    publish(255,10,0,k_uptime_get_32());return 0;
   }
 #endif
-#if CONFIG_BES2700_M55_FAULT_CASE == 2
+#if CONFIG_BES2700_M55_FAULT_CASE == 2 || CONFIG_BES2700_M55_FAULT_CASE == 5 || CONFIG_BES2700_M55_FAULT_CASE == 6
   if (dual_shared.beat >= BES_PEER_INJECTION_BEATS) { inject_fault(); }
 #endif
   size_t free = 0;
@@ -87,7 +113,14 @@ int main(void)
    * emitting several heartbeats after a stall. Existing failures keep priority. */
   if (!error && (now < deadline || now - deadline > HEARTBEAT_MAX_LATE_MS)) { error = 4; }
   publish(error ? 255 : 2, error, free, (uint32_t)now);
-  if (error || DUAL_TRACE->stage!=5) { dual_trace_record(error ? 255 : 5, error); }
+  uint32_t trace_stage=error?255:5,trace_reason=error;
+#if CONFIG_BES2700_M55_FAULT_CASE == 3
+  extern int q_fault_injected(void);
+  if(!error && first_session() && q_fault_injected()) { trace_stage=BES_PEER_INJECTION_STAGE;trace_reason=3; }
+#elif CONFIG_BES2700_M55_FAULT_CASE == 4
+  if(!error && first_session() && BES_LIFECYCLE_CTL->quiesce==1) { trace_stage=BES_PEER_INJECTION_STAGE;trace_reason=4; }
+#endif
+  if(error || DUAL_TRACE->stage!=trace_stage) { dual_trace_record(trace_stage,trace_reason); }
   if (error) { return 0; }
   deadline += HEARTBEAT_PERIOD_MS;
   k_sleep(K_TIMEOUT_ABS_MS(deadline));

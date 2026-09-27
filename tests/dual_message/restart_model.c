@@ -127,7 +127,7 @@ int main(void)
   assert(r.bth.rx==r.m55.kicks && r.m55.rx==r.bth.kicks);
   assert(r.bth.done==r.bth.kicks && r.m55.done==r.m55.kicks);
   assert(task[1].done && !task[0].done);
-  printf("R1 host round=%u session=%u sent=%u/%u rc=%u\n",round,r.session,r.bth.sent,r.m55.sent,r.rc);
+  printf("LIFECYCLE host round=%u session=%u sent=%u/%u rc=%u\n",round,r.session,r.bth.sent,r.m55.sent,r.rc);
  }
  return 0;
 }

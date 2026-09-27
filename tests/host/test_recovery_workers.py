@@ -9,6 +9,12 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class RecoveryWorkers(unittest.TestCase):
     def test_abort_recreate_and_new_session_with_real_workers(self):
+        self.run_workers(2)
+
+    def test_stalled_real_peer_worker_is_detected_and_recreated(self):
+        self.run_workers(3)
+
+    def run_workers(self, fault_case):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             shim = (ROOT/'tests/dual_message/shim.h').read_text().replace(
@@ -17,6 +23,7 @@ class RecoveryWorkers(unittest.TestCase):
                 'void k_thread_abort(void *p);')
             shim = shim.rsplit('#endif', 1)[0]
             shim += '''
+void k_sleep(int);
 #define K_NO_WAIT 0
 #define K_THREAD_STACK_DEFINE(n,s) static char n[s]
 #define K_THREAD_STACK_SIZEOF(n) sizeof(n)
@@ -88,13 +95,26 @@ void k_thread_start(k_tid_t thread) { assert(thread && task[0].done);task[0].don
 int bes2700_mbox_suspend(const struct device *d)
 { ep[d->id].masked=1;ep[d->id].enabled=false;return 0; }
 int main(void)''')
+            if fault_case == 3:
+                model=model.replace('#include "message.h"', '#include "message.h"\n#include <bes2700_peer_health.h>')
+                model=model.replace('int main(void)', 'void k_sleep(int delay) { assert(delay==K_FOREVER);task[current].wake=INT64_MAX;task[current].sem=NULL;yield();assert(0); }\nint main(void)')
+                model=model.replace('  unsigned steps=0;struct q_report r={0};',
+                    '  struct bes_peer_progress health;bes_peer_progress_init(&health,now);\n'
+                    '  unsigned steps=0;struct q_report r={0};')
+                model=model.replace('if(!round && ((struct bi_ring *)BI_BASE)->state.sent>32) { break; }',
+                    'if(!round) {\n'
+                    '    bool pending=r.bth.sent>r.bth.acked || r.m55.sent>r.bth.handled;\n'
+                    '    enum bes_peer_fault fault=bes_peer_progress_poll(&health,now,pending,r.bth.acked,r.bth.handled);\n'
+                    '    if(fault) { assert(fault==BES_PEER_IPC_TIMEOUT && !r.finished && r.bth.acked>=32);break; }\n'
+                    '   }')
+                model=model.replace('now=INT64_MAX;for(int n=0;', 'now+=20;for(int n=0;')
             (root/'model.c').write_text(model)
             exe=root/'recovery'
             subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',
                 '-fsanitize=undefined','-fno-sanitize-recover=all','-DTEST_RECOVERY=1',
-                '-DCONFIG_BES2700_M55_RESTART=1','-DCONFIG_BES2700_M55_FAULT_CASE=2',
+                '-DCONFIG_BES2700_M55_RESTART=1',f'-DCONFIG_BES2700_M55_FAULT_CASE={fault_case}',
                 '-DCONFIG_BES2700_M55_RECOVERY=1','-DCONFIG_DUAL_MSG_MODE=1','-DCONFIG_DUAL_IPC_SECONDS=600',
                 '-I',str(root),'-I',str(ROOT/'include/bestechnic/bes2700yp'),
                 '-I',str(ROOT/'platforms/bes2700yp/ipc'),str(root/'bth.c'),str(root/'m55.c'),
-                str(root/'model.c'),'-o',str(exe)],check=True)
+                str(root/'model.c'),str(ROOT/'platforms/bes2700yp/lifecycle/health.c'),'-o',str(exe)],check=True)
             subprocess.run([str(exe)],check=True,timeout=30)

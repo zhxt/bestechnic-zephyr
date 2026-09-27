@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Strict R1 lifecycle/profile/BTH liveness acceptance. Exit 0/1/2."""
+"""Strict lifecycle/profile/BTH liveness acceptance. Exit 0/1/2."""
 import argparse
 import json
 import re
@@ -9,6 +9,7 @@ import analyze_boot_profile as profile
 from analyze_dual_boot import prefix_contract
 from analyze_dual_message import FIELDS
 from validation_profiles import validate_manifest
+from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 LIFECYCLE = dict(layout=0x000a0004, address=0x2015e280, bytes=128, rounds=11,
                  target=1000, observe_seconds=600, ready_ms=5000,
@@ -29,7 +30,7 @@ PREFIX=re.compile(r'(NA|\d+)/([IE])/BTH/([A-Z0-9]+)/([A-Z]+) \| (zephyr_\w+) (.+
 
 class Restart:
     @staticmethod
-    def analyze(text,m, *, continuation=False, ram_mapping=None):
+    def analyze(text,m, *, continuation=False, ram_mapping=None, round_start=1, end_step=None):
         errors=[];missing=[];boot=[];rows=[];samples=[];last_time=None;ended=False
         expected_boot=[('begin',dict(version=1,test=8,build=int(m['build'],0))),
             ('stage',dict(stage='adapter_ready')),('adapter',dict(cpuid=0x630f1321,ipsr=0,control=0)),
@@ -64,7 +65,7 @@ class Restart:
                 if (module,context)!=prefix_contract(namespace+' '+body+' !'):errors.append('boot prefix')
                 if ts=='NA' and kind not in ('begin','adapter') and d.get('stage')!='adapter_ready':errors.append('late NA')
                 boot.append((kind,d));continue
-            if namespace!='zephyr_r1' or (module,context)!=('R1','MAIN') or ts=='NA':errors.append('R1 prefix/namespace')
+            if namespace!=LOG_NAMESPACE or (module,context)!=(LOG_MODULE,'MAIN') or ts=='NA':errors.append('LIFECYCLE prefix/namespace')
             record=dict(kind=kind,time=int(ts) if ts!='NA' else 0,fields=d)
             if kind=='sample':
                 if not rows or rows[0]['kind']!='begin':errors.append('sample before begin')
@@ -82,8 +83,10 @@ class Restart:
                 rows.append(record)
                 if kind=='result':ended=True
         expected=[] if continuation else [('begin',None,None)]
-        for n in (range(1,2) if continuation else range(11)):
+        for n in (range(round_start,round_start+1) if continuation else range(11)):
             expected += [('event',n,1)]+([('repark',n,7)] if n else [])+[('event',n,x) for x in (2,3)]+[('reset',n,3),('event',n,4),('ready',n,None)]+[('endpoint',n,x) for x in (0,1)]+[('peer',n,None)]+[('event',n,x) for x in (5,6)]+[('reset',n,4),('event',n,7),('hardware',n,None),('event',n,8),('session',n,None)]
+        if continuation and end_step is not None:
+            expected=expected[:expected.index(('event',round_start,end_step))+1]
         if not continuation:expected += [('result',None,None)]
         actual=[(r['kind'],r['fields'].get('round'),r['fields'].get('step' if r['kind']=='event' else 'op' if r['kind'] in ('reset','repark') else 'side')) for r in rows]
         if actual!=expected[:len(actual)]:errors.append('lifecycle order/missing/duplicate')
@@ -91,6 +94,7 @@ class Restart:
         if not continuation and boot!=expected_boot:missing.append('boot incomplete')
         if not continuation and len(samples)!=601:missing.append(f'samples {len(samples)}/601')
         if continuation and (boot or samples):errors.append('unexpected continuation boot/sample')
+        if m.get('lifecycle_log')!=LOG_CONTRACT:errors.append('lifecycle log contract')
         if m.get('restart_version')!=4 or m.get('restart_rounds')!=(2 if continuation else 11) or m.get('restart_target')!=1000 or m.get('dual_layout')!='0x000a0004' or m.get('duration_seconds')!=600 or m.get('lifecycle')!=LIFECYCLE or m.get('reset_diagnostic')!=RESET_DIAGNOSTIC or m.get('repark_diagnostic')!=REPARK_DIAGNOSTIC:errors.append('manifest contract')
         sampler=m.get('reset_sampler',0)
         if not isinstance(sampler,int) or not sampler&1 or not 0x00500000<=sampler<0x00510000:errors.append('sampler manifest')
@@ -163,6 +167,9 @@ class Restart:
             elif k=='result':
                 if d!={'pass':1,'sessions':11,'restarts':10,'samples':601,'rc':0}:errors.append('final result')
                 if missing or len(samples)!=601 or r['time']<samples[-1]['time']:errors.append('early final result')
+        if continuation and end_step==5:
+            a=endpoints.get((round_start,0));b=endpoints.get((round_start,1))
+            if not a or not b or a['rx']!=b['kicks'] or b['rx']!=a['kicks']:errors.append('IRQ accounting')
         status='fail' if errors else 'incomplete' if missing else 'pass'
         s=dict(status=status,errors=errors,missing=missing,records=rows,samples=samples)
         return dict(status=status,session_count=1,sessions=[s])

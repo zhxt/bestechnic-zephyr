@@ -29,12 +29,12 @@ config BES2700_M55_RESTART
  default n
 
 config BES2700_M55_FAULT_CASE
- int "M55 fault injection: 0=off, 1=before READY, 2=heartbeat stop"
- range 0 2
+ int "M55 fault injection: 0=off, 1=READY, 2=heartbeat, 3=IPC, 4=QUIESCE, 5=fatal, 6=lost fatal"
+ range 0 6
  default 0
  help
    Validation only. Nonzero values require the retained-RAM lifecycle.
-   The M55 CPU deliberately stops with interrupts disabled.
+   Select a controlled peer fault in the validation application only.
 
 config BES2700_M55_RECOVERY
  bool "Validate one M55 recovery after isolation"
@@ -43,3 +43,12 @@ config BES2700_M55_RECOVERY
  help
    Rebuild the BTH worker and reload M55 once with a new session.
    Inject only in session 1; failed recovery remains isolated.
+
+config BES2700_M55_RECOVERY_FAIL_STEP
+ int "Recovery failure injection: 0=off, 1=REPARK, 3=load, 5=new READY"
+ range 0 5
+ default 0
+ help
+   Validation only. Values 1 and 3 inject an operation failure before
+   touching hardware or loading RAM. Value 5 stops the replacement
+   M55 before READY. Profiles reject other nonzero values.

@@ -56,12 +56,14 @@ struct bes_repark_diag {
 _Static_assert(sizeof(struct bes_repark_diag)==100,"repark diagnostic ABI");
 #define BES_REPARK_DIAG ((volatile struct bes_repark_diag *)BES_REPARK_DIAG_ADDR)
 /* BTH writes the first 64 bytes only while M55 is parked, except quiesce.
- * M55 publishes idle only after its worker and heartbeat stop shared access. */
+ * M55 publishes idle only after its worker and heartbeat stop shared access.
+ * Validation reserves M55-owned unused[0] as the pre-panic injection marker.
+ * It is diagnostic only; the health policy never consults this word. */
 struct bes2700_lifecycle_control {
  uint32_t magic, layout, session, quiesce, guard, reserved[11];
  uint32_t idle, peer_session, peer_guard, unused[13];
 };
-_Static_assert(sizeof(struct bes2700_lifecycle_control)==128,"R1 control ABI");
+_Static_assert(sizeof(struct bes2700_lifecycle_control)==128,"LIFECYCLE control ABI");
 #define BES_LIFECYCLE_CTL ((volatile struct bes2700_lifecycle_control *)BES_LIFECYCLE_ADDR)
 int bes2700_lifecycle_validate(void);
 int bes2700_lifecycle_peer_poll(void);

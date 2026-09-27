@@ -12,7 +12,7 @@ def manifest(case=1):
     return dict(restart_manifest(),
                 validation_profile='m55-ready-timeout' if case == 1 else 'm55-heartbeat-stop',
                 isolation_version=1, fault_case=case, ready_timeout_ms=5000,
-                heartbeat_timeout_ms=1000, fault_poll_ms=20,
+                heartbeat_timeout_ms=1000, ipc_timeout_ms=1000, fault_poll_ms=20,
                 injection_stage=6, injection_beats=10, restart_rounds=1)
 
 
@@ -23,13 +23,13 @@ def fixture(case=1):
             if 'zephyr_bth ' in line or 'zephyr_bootprof ' in line]
     rows = []
     def row(time, kind, **fields):
-        rows.append((time, f'{time}/I/BTH/R1/MAIN | zephyr_r1 {kind} ' +
+        rows.append((time, f'{time}/I/BTH/LIFECYCLE/MAIN | zephyr_lifecycle {kind} ' +
                      ' '.join(f'{key}={value}' for key, value in fields.items()) + ' !'))
     row(1999, 'isolation_begin', version=1, layout=0xa0004, build=int(m['build'], 0),
         m55_build=int(m['m55_build'], 0), pair=m['message_pair'], fault_case=case,
         ready_ms=5000, heartbeat_ms=1000, duration=600, rc=0)
     for line in original.splitlines():
-        if 'zephyr_r1 sample ' in line or ('round=0 session=1' in line and
+        if 'zephyr_lifecycle sample ' in line or ('round=0 session=1' in line and
                 (' event ' in line and any(f'step={i} ' in line for i in (1, 2, 3, 4))
                  or ' reset ' in line and 'op=3 ' in line
                  or case == 2 and ' ready ' in line)):
@@ -38,7 +38,7 @@ def fixture(case=1):
     row(detected, 'detected', session=1, reason=case, age=5000 if case == 1 else 1000,
         beat=0 if case == 1 else 10, trace_stage=6, injection=case, elapsed=detected-2100, rc=0)
     reset = next(line for line in original.splitlines()
-                 if 'zephyr_r1 reset round=0 ' in line and 'op=4 ' in line)
+                 if 'zephyr_lifecycle reset round=0 ' in line and 'op=4 ' in line)
     rows.append((detected+1, str(detected+1) + '/' + reset.split('/', 1)[1]))
     row(detected+2, 'isolated', session=1, local_idle=1, reset_held=1, channel_clean=1,
         failed_step=0, service_rc=0, rc=0)
@@ -56,7 +56,7 @@ class IsolationParser(unittest.TestCase):
             m, text = manifest(case), fixture(case)
             result = analyze(text, m)
             self.assertEqual(result['status'], 'pass', result)
-            partial = text[:text.index('20000/I/BTH/R1')]
+            partial = text[:text.index('20000/I/BTH/LIFECYCLE')]
             self.assertEqual(analyze(partial, m)['status'], 'incomplete')
             self.assertEqual(analyze(text + partial, m)['status'], 'incomplete')
             self.assertEqual(analyze(text[:-15], m)['status'], 'incomplete')
@@ -78,7 +78,7 @@ class IsolationParser(unittest.TestCase):
                              ('releases=1', 'releases=2'),
                              ('recoveries=0', 'recoveries=1'),
                              ('guards=1', 'guards=0'),
-                             ('/I/BTH/R1', '/E/BTH/R1'),
+                             ('/I/BTH/LIFECYCLE', '/E/BTH/LIFECYCLE'),
                              ('session=1', 'session=2')]:
                 with self.subTest(case=case, mutation=new):
                     self.assertIn(old, text)
@@ -90,10 +90,10 @@ class IsolationParser(unittest.TestCase):
     def test_order_duplicates_and_early_success(self):
         m, text = manifest(), fixture()
         lines = text.splitlines()
-        at = next(i for i, line in enumerate(lines) if 'zephyr_r1 isolated ' in line)
+        at = next(i for i, line in enumerate(lines) if 'zephyr_lifecycle isolated ' in line)
         duplicate = lines[:at] + [lines[at]] + lines[at:]
         self.assertEqual(analyze('\n'.join(duplicate), m)['status'], 'fail')
-        missing = [line for line in lines if 'zephyr_r1 reset ' not in line]
+        missing = [line for line in lines if 'zephyr_lifecycle reset ' not in line]
         self.assertEqual(analyze('\n'.join(missing), m)['status'], 'fail')
         missing_sample = [line for line in lines if 'sample id=600 ' not in line]
         self.assertEqual(analyze('\n'.join(missing_sample), m)['status'], 'fail')
