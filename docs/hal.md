@@ -4,6 +4,46 @@
 
 `hal_bestechnic` supplies prebuilt HAL libraries, a public interface header, and a linker script for the BES2700YP Zephyr integration. Bootstrap links the libraries for early hardware initialization and retains service entry points for BTH. The BTH and M55 Zephyr images do not link the HAL libraries directly; see [architecture](architecture.md#hal-and-hardware-service-boundary).
 
+## Read-only resource service
+
+The [resource ABI](../include/bestechnic/bes2700yp/bes2700yp_resources.h) exposes
+system snapshots through the resident BTH bootstrap. BTH applications use
+`bes_resource_read()`; neither Zephyr core links the vendor HAL directly.
+The service offers a system-snapshot capability. It does not advertise UART
+frequency, pinmux, pull or voltage readback, or resource writes.
+
+Discovery uses operation 9 of the existing 32-byte dual service, independently
+of M55 preparation. The returned 32-byte descriptor resides in read-only Flash;
+its data address and Thumb execution entry are validated separately. The ABI
+uses fixed-width integer fields, a 96-byte request and a 64-byte snapshot.
+The entire aligned request must lie in BTH application RAM
+`[0x20540000, 0x2055c000)`, outside the diagnostic page and M55 memory.
+Reserved fields must be zero. The final ELF audit checks the descriptor,
+file-backed executable callees, integer-only dispatch and a 256-byte stack
+budget for the service call chain, excluding exception frames and the caller.
+
+`bes_resource_connect()` runs once in `PRE_KERNEL_1` at priority 0. The early
+snapshot is retained until application validation can print it. Privileged
+BTH early/thread callers may read snapshots; interrupt and unprivileged
+contexts are rejected. A short interrupt-masked read excludes BTH lifecycle
+preemption and restores PRIMASK. There is no wait, logging or hardware write
+in the service. Hardware can still evolve between register reads, so this is
+not an atomic snapshot of independently running hardware.
+
+Before the peer has been parked, only the lifecycle phase is valid; hardware
+fields are zero and their validity bits are clear. In parked, released and
+reset-held states, existing HAL register readback and the 24 MHz configuration
+check are available. That check describes configured clock sources, not an
+external frequency measurement. Missing validity bits mean unavailable data,
+not a successful zero-valued read. No M55 TCM access is needed while reset is held.
+
+The wire protocol defines its own signed statuses. The client maps malformed
+requests to `-EINVAL`, unsupported ABI/operations/resources to `-ENOTSUP`,
+invalid execution context to `-EPERM`, an unconnected client to `-ENODEV`, and
+an invalid response to `-EIO`. On failure the caller must discard the output.
+Future state-changing operations require the arbitration contract below;
+they are not implied by the read-only capability.
+
 ## Runtime resource interface design
 
 This section specifies the resource-service design. Available APIs and drivers

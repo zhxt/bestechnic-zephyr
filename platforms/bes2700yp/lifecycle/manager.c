@@ -8,6 +8,7 @@
 #include <bes2700_lifecycle.h>
 #include <bes2700_peer_health.h>
 #include <bes2700_observation.h>
+#include <bes2700yp_resources.h>
 #include "bth_contract.h"
 #include "m55_payload.h"
 #include "message.h"
@@ -38,6 +39,16 @@ static void event(uint32_t round,uint32_t step,uint32_t rc,uint32_t elapsed)
  begin("event",rc);field(" round=",round);field(" session=",generation);
  field(" step=",step);field(" rc=",rc);field(" elapsed=",elapsed);end();
 }
+static int resource_check(uint32_t phase)
+{
+ static uint32_t checked;
+ if (checked & (1U << phase)) { return 0; }
+ k_mutex_lock(&log_lock,K_FOREVER);
+ int rc=bes_resource_probe(phase);
+ k_mutex_unlock(&log_lock);
+ if (!rc) { checked |= 1U << phase; }
+ return rc;
+}
 static int reset_call(unsigned round,uint32_t op,uint32_t failure)
 {
  volatile uint32_t *words=(void *)BES_RESET_DIAG;
@@ -51,6 +62,7 @@ static int reset_call(unsigned round,uint32_t op,uint32_t failure)
  BES_RESET_FIELDS(PRINT_RESET)
 #undef PRINT_RESET
  field(" rc=",rc?failure:0);end();
+ if (!rc && op==DUAL_RELEASE) { rc=resource_check(3); }
  return rc;
 }
 static int repark_call(unsigned round)
@@ -125,6 +137,7 @@ static void monitor(void *a,void *b,void *c)
 }
 static int observe_terminal(int rc, uint32_t attempts, uint32_t recoveries)
 {
+ if (!rc && resource_check(4)) { rc=45; }
  if(!rc && !monitor_error) {
   observe_begin("functional",0);
   observation.functional_ms=(uint32_t)(k_uptime_get()-monitor_origin);
@@ -514,7 +527,7 @@ static int isolation_run(void)
 int bes2700_lifecycle_validate(void)
 {
  bth_stage("main");const volatile struct dual_service *api=(void *)DUAL_SERVICE_ADDR;
- uint32_t fn=api->dispatch;int rc=0;unsigned completed=0;
+ uint32_t fn=api->dispatch;int rc=resource_check(0)?44:0;unsigned completed=0;
  uint32_t service_errors=dual_service_validate(api);
  uint32_t cpuid=SCB->CPUID,vtor=SCB->VTOR,control=__get_CONTROL(),ipsr=__get_IPSR();
  uint32_t primask=__get_PRIMASK(),basepri=__get_BASEPRI();

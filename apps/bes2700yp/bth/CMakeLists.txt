@@ -3,6 +3,10 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(bes2700_bth_dual_message)
 target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/boot/service_contract.c)
+target_sources(app PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/contract.c
+  ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/client.c
+  ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/probe.c)
 zephyr_get(DUAL_GENERATED_DIR SYSBUILD)
 if(CONFIG_BES2700_M55_RESTART)
   target_sources(app PRIVATE src/restart.c

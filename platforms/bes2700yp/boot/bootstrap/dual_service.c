@@ -2,9 +2,13 @@
 /* Resident bare HAL bridge. Only BTH Zephyr's loader calls this service.
  * No RTX, DMA, vendor trace, IRQ registration or automatic M55 application. */
 #include "arch.h"
+#include <bes2700yp_resources.h>
+
+extern const struct bes_resource_descriptor bes_resource_service;
 #include <bestechnic/bes2700yp/hw.h>
 #include "bes2700_dual_boot.h"
 static uint32_t phase, release_sp, release_pc;
+uint32_t dual_service_phase(void) { return phase; }
 #ifdef BES_BTH_M55_RESTART
 #include "bth_contract.h"
 #include "reset_timer.h"
@@ -74,6 +78,9 @@ static __attribute__((noinline)) int repark_cpu(void)
 #endif
 static int dual_dispatch(uint32_t op, uint32_t arg)
 {
+ if (op == BES_RESOURCE_DISCOVER) {
+  return arg == BES_RESOURCE_ABI ? (int32_t)(uintptr_t)&bes_resource_service : BES_RESOURCE_UNSUPPORTED;
+ }
 #ifdef BES_BTH_M55_RESTART
  if(op==BES_LIFECYCLE_RESET_STATUS && phase==4) {
   int rc=reset_status();if(rc) { phase=5; }return rc;

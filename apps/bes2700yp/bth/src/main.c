@@ -8,6 +8,7 @@
 #include "message.h"
 #include <bes2700_dual_doorbell.h>
 #include <bes2700_observation.h>
+#include <bes2700yp_resources.h>
 #define SECONDS CONFIG_DUAL_DURATION_SECONDS
 BUILD_ASSERT(SECONDS==(CONFIG_DUAL_MSG_MODE!=2?600:CONFIG_DUAL_IPC_SECONDS+10));
 _Static_assert(BTH_LOG_ADDR >= DUAL_HW_ADDR + sizeof(struct dual_hw), "log/hardware overlap");
@@ -123,6 +124,7 @@ static int peer_ok(const struct dual_status *s)
 int main(void)
 {
  bth_stage("main");
+ if (bes_resource_probe(0)) { finish(0,96); return 0; }
  bth_log_begin('I',"LOADER","MAIN");
  bth_puts("zephyr_dual begin version=3 test=8"); bth_field(" build=",BTH_DIAG->build);
  bth_field(" m55_build=",M55_BUILD_ID); bth_field(" layout=",DUAL_LAYOUT);
@@ -167,6 +169,7 @@ int main(void)
  __DSB();stage(5,0);
  rc=service(DUAL_RELEASE,DUAL_TRAMPOLINE|1);stage(6,rc?1:0);
  if (rc) { finish(0,86); return 0; }
+ if (bes_resource_probe(3)) { finish(0,96); return 0; }
  diagnostics(1,0,0,0);
  struct dual_status peer={0};
  uint32_t handshake=k_uptime_get_32(), reads=0, retries=0;

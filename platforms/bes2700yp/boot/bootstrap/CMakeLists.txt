@@ -15,7 +15,11 @@ if(BES_M55_RESTART)
 endif()
 set(abi -mthumb -mcpu=cortex-m33 -mfpu=fpv5-sp-d16 -mfloat-abi=hard)
 add_executable(adapter adapter.c handoff.S payload.S dual_service.c boot_profile.c copy_bytes.S
+  resource_service.c ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/contract.c
   ${GENERATED_DIR}/build_info.c)
+set_source_files_properties(resource_service.c
+  ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/contract.c
+  PROPERTIES COMPILE_OPTIONS "-fstack-usage;-mgeneral-regs-only")
 if(BES_M55_RESTART)
   target_sources(adapter PRIVATE reset_timer.c)
 endif()

@@ -14,6 +14,7 @@ import tempfile
 import zlib
 from pathlib import Path
 
+from audit_resources import audit as audit_resources
 from audit_dual import (audit_doorbell, audit_m55, check_resource_contract,
                         audit_lifecycle, audit_service_entry, audit_reset_timer, audit_repark)
 from check_bth_layout import audit, symbols
@@ -265,6 +266,8 @@ def final(a):
     report['lifecycle_memory'] = audit_lifecycle((belf, melf, a.elf), a.cross, resources)
     report['service_entry'] = audit_service_entry(a.elf, belf, a.cross, ROOT, generated,
                                                   get_profile(identity['validation_profile']).m55_restart)
+    report['resource_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated)
+    layout['resource_service'] = report['resource_service']
     layout.update(version='V08c_QMSG_T2', build_architecture='bestechnic-zephyr-v1', test=8,
         log_version=3, prefix_version=1, duration_seconds=identity['heartbeat'],
         log_clock_state=[0x2055c180,0x2055c1a0], m55_build=f'0x{identity["m55_build"]:08x}',

@@ -279,3 +279,19 @@ Inspect `build/verify-incremental/incremental-evidence/report.json` for `status:
 ```
 
 The output directory must be new; logs and `isolation-report.json` appear there. If an ordinary build with the same inputs and `ipc-backpressure` profile already exists, add `--reference-build build/bes2700yp/main` (adjust path as needed). The script compares identities and requires the ordinary and two isolated `zephyr.bin` files to match exactly, detecting effects such as different toolchain installation paths.
+
+## Resource snapshot checks
+
+Releases declaring `resource_service` in `layout.json` require resource records
+as well as the selected IPC/lifecycle evidence. The packaged analyzers validate
+the early phase-only snapshot and the released-peer hardware snapshot. Lifecycle
+profiles additionally require a reset-held snapshot with retained RAM mappings.
+The early record prints a snapshot captured by the pre-kernel initializer;
+its log timestamp is the print time. Missing records make a requested scope
+incomplete, and malformed or failed records make it fail. The existing short
+observation window starts after the complete functional scenario, as before.
+
+Offline packaging checks the read-only descriptor, the client initializer and
+validators, the complete retained call graph, and the service stack budget.
+These checks do not replace a physical startup test or certify a new board's
+pin mapping or voltage levels.

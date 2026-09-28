@@ -43,6 +43,12 @@ Only bootstrap links the HAL libraries. BTH and M55 Zephyr images do not link th
 
 ### Resource-service extension design
 
+The [read-only service](hal.md#read-only-resource-service) implements discovery
+and system snapshots. Its descriptor is linked into bootstrap `.rodata`;
+requests use caller-owned BTH application RAM. The legacy service and diagnostic
+allocations retain their layouts. The following contract also governs future
+state-changing resource operations.
+
 The resource-service design keeps the same library boundary: Zephyr driver → BTH
 resource client → retained bootstrap resource service → restricted HAL facade.
 UART/GPIO data and ISR work stay in the Zephyr driver; only shared hardware setup
