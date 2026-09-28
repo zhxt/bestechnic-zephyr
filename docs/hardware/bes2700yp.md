@@ -119,3 +119,72 @@ The [BTH DTS](../../bsp/dts/arm/bestechnic/bes2700yp_bth.dtsi) and [boot contrac
 Code regions here are runtime memory loaded by the boot process. The board DTS `zephyr,flash` choice is for link layout and does not make these regions physical flash. The table omits some boot, diagnostic, and service reservations; use generated DTS, link results, and `release/offline-validation.json` for the complete allocation. See [offline audit](../architecture.md#offline-audit). These runtime addresses are not flash addresses.
 
 Extended profiles cover stalled IPC, QUIESCE timeout, readable/lost fatal publication and recovery-operation failure; see [extended fault contracts](../m55-restart.md#extended-fault-and-recovery-failure-profiles). Injected software failures do not establish physical hardware-failure acceptance.
+
+## Resource ownership
+
+The current dual-core applications use the following ownership policy. It is a
+software access contract, not MPU enforcement or proof of electrical wiring.
+Bootstrap initializes shared hardware; BTH manages its subsequent use. M55 owns
+its private core peripherals and the fields assigned to its IPC endpoint.
+
+| Resource | Initialization / runtime owner | Access boundary |
+|---|---|---|
+| BTH and SYS root clocks | Bootstrap HAL / BTH | Keep the configured 24 MHz; peripheral setup must not change a shared parent clock |
+| CMU, PSC, PMU and IOMUX | Bootstrap HAL / BTH | M55 has no independent shared clock, power, reset or pinmux authority |
+| SysTick and NVIC | Each Zephyr kernel | Private to each core; identical addresses or IRQ numbers across cores do not imply a conflict |
+| BTH fast timer at `0x40002000` | Bootstrap HAL / BTH | The 6 MHz counter serves logs and bounded reset checks; keep it running and do not claim it for another driver |
+| AON timer | Bootstrap / shared read-only observation | Nominal frequency is not an external calibration; measure the actual timebase before changing clock assumptions |
+| BTH UART0 at `0x4000b000` | Bootstrap / BTH logging | Still occupied when its Zephyr DTS node is disabled; Zephyr driver takeover needs an explicit handoff |
+| Pads P2_2 and P2_3 | Bootstrap UART RX/TX | Reserved even with Serial/Console disabled; they are chip pads, not connector pin numbers |
+| Mailbox hardware channel 1 | Each endpoint | Only the assigned SET/CLR fields are shared; hardware channel 0 remains reserved for the loader |
+| M55 CPU reset and retained RAM | BTH lifecycle manager | Hold and confirm CPU reset before reloading or remapping; keep domain power and RAM retained |
+
+The mailbox accesses SYS `[0x500000a0, 0x500000a8)` and BTH
+`[0x40000134, 0x4000013c)` on both cores. This explicit field-sharing protocol does
+not grant either client ownership of an entire CMU window. Recovery may clear both
+endpoints only after the peer is held in reset and local users have stopped.
+CPU reset alone does not prove that future DMA or other bus masters are idle.
+
+IRQ identity is `(core, interrupt controller, IRQ)`. Current mailbox RX/TX_DONE
+IRQs are BTH 39/37 and M55 41/39, with priority 3. BTH UART0 uses IRQ 17 with
+priority 2. Both cores use three priority bits, with 64 BTH and 72 M55 external
+IRQs. AON GPIO routing has not been established by this port and must not be
+inferred by copying an IRQ number between cores.
+
+### Memory ownership and aliases
+
+Use the [resource contract](../../platforms/bes2700yp/resources.json),
+[bootstrap contract](../../platforms/bes2700yp/boot/bootstrap/bth_contract.h),
+generated DTS and [existing ELF audit](../../scripts/audit_dual.py) together.
+BTH code at `0x00510000` and its loader view at `0x20510000` describe the same
+physical allocation. A second memory node must not make either alias available
+for a heap or another owner. Bootstrap, handoff/diagnostic slots and boot mailboxes
+are reserved even when not every slot appears as a separate DTS node.
+
+The effective M55 application DTCM must stop before the message region defined in
+the resource contract. Loader, heartbeat, trace, doorbell, lifecycle, unallocated
+tail and mailbox regions keep their declared owners. The lifecycle record assigns
+the first 64 bytes to BTH and the last 64 bytes to M55. BTH may initialize shared
+protocol state only after all relevant users are quiescent.
+
+M55 TCM also has physical RAM-bank mappings. The recovery REPARK operation
+temporarily uses three physical words named in the resource contract, with the
+peer held in reset and selectors restored afterwards. These words and their
+banks are not additional free memory. Static DTS checks supplement the ELF and
+physical-bank audit; they do not replace it.
+
+### Adding a resource user
+
+For a new GPIO/UART instance, first identify the owner, clock/reset dependencies,
+pad group, voltage, local IRQ route and interactions with M55 recovery. Unknown
+board mappings remain unknown. A similar reference board is not sufficient
+evidence for a connector assignment or electrical level.
+
+Clock-rate queries, gate changes and shared-root reconfiguration are distinct
+operations. Runtime services need defined calling context, bounded failure and
+concurrency rules; an empty implementation must not report hardware support.
+The current bootstrap HAL ABI is for BTH and is not directly callable from M55.
+UART handoff must drain TX, transfer IRQ/state ownership and establish one runtime
+writer while preserving early and fatal diagnostics. General GPIO/pinctrl,
+power-domain control and system PM still require separate implementations and
+hardware validation.

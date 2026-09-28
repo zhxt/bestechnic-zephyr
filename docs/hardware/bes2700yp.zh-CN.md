@@ -127,3 +127,56 @@ BTH 区域由 [BTH DTS](../../bsp/dts/arm/bestechnic/bes2700yp_bth.dtsi)和[启�
 以上均为运行地址，不能直接作为刷写地址。
 
 扩展场景包括 IPC 停滞、QUIESCE 超时、fatal 发布可读/缺失及恢复操作失败；见[扩展故障契约](../m55-restart.zh-CN.md#扩展故障及恢复失败场景)。软件注入失败不等于真实硬件故障验收。
+
+## 资源所有权
+
+当前双核应用采用以下所有权约定。这是软件访问契约，不代表 MPU 已实施隔离或板级接线已经验证。
+bootstrap 初始化共享硬件，随后由 BTH 管理；M55 管理核内私有外设及分配给本端的 IPC 字段。
+
+| 资源 | 初始化者 / 运行期所有者 | 访问边界 |
+|---|---|---|
+| BTH 与 SYS 根时钟 | bootstrap HAL / BTH | 保持配置的 24 MHz；外设初始化不能改变共享父时钟 |
+| CMU、PSC、PMU、IOMUX | bootstrap HAL / BTH | M55 无独立修改共享时钟、电源、复位或引脚复用的权限 |
+| SysTick、NVIC | 各自 Zephyr 内核 | 核内私有；两核地址或 IRQ 数字相同不构成冲突 |
+| BTH fast timer `0x40002000` | bootstrap HAL / BTH | 6 MHz 计数器用于日志和有界复位检查，必须保持运行，不得交给其他驱动重新配置 |
+| AON timer | bootstrap / 共享只读观测 | 标称频率不等于外部校准；更改计时假设前测量实际时基 |
+| BTH UART0 `0x4000b000` | bootstrap / BTH 日志 | 即使 Zephyr DTS 节点 disabled 仍然占用，原生驱动接管需要显式交接 |
+| P2_2、P2_3 | bootstrap UART RX/TX | 即使 Serial/Console 关闭仍然保留；这是芯片 pad，不是连接器针号 |
+| mailbox 硬件通道 1 | 两端各自管理 | 仅按协议共享指定 SET/CLR 字段，硬件通道 0 保留给 loader |
+| M55 CPU reset 与 RAM 保持 | BTH 生命周期管理器 | 重载或重映射前先复位并确认 CPU 停止；域电源与 RAM 保持 |
+
+mailbox 两端使用 SYS `[0x500000a0, 0x500000a8)` 与 BTH `[0x40000134, 0x4000013c)`。
+这一字段共享协议不授予任一客户端整个 CMU 寄存器窗口的所有权。恢复时仅在确认对端保持复位、
+本地访问者已静止后，才允许清理两端状态。CPU reset 本身不能证明未来 DMA 等其他总线 master 已停止。
+
+IRQ 身份为 `(core, interrupt controller, IRQ)`。当前 mailbox RX/TX_DONE 分别为
+BTH 39/37、M55 41/39，优先级 3；BTH UART0 使用 IRQ 17、优先级 2。
+两核均使用三位优先级，BTH/M55 分别配置 64/72 个外部 IRQ。当前移植尚未确认 AON GPIO 的实际路由，
+不能通过跨核复制 IRQ 数字来选择它。
+
+### 内存所有权与别名
+
+应结合[资源契约](../../platforms/bes2700yp/resources.json)、
+[bootstrap 契约](../../platforms/bes2700yp/boot/bootstrap/bth_contract.h)、生成 DTS
+及[现有 ELF 审计](../../scripts/audit_dual.py)核对分配。
+BTH `0x00510000` 代码视图和 `0x20510000` 装载视图属于同一物理分配，不能通过增加另一内存节点
+将别名交给 heap 或其他使用者。bootstrap、handoff/诊断槽和 boot mailbox 始终保留，
+即使 DTS 未为每个槽单独建立节点。
+
+最终 M55 普通 DTCM 必须止于资源契约中的消息区之前。loader、heartbeat、trace、doorbell、
+lifecycle、未分配尾部和 mailbox 保持各自声明的所有者。lifecycle 前 64 字节由 BTH 写，
+后 64 字节由 M55 写。仅在相关使用者均静止后，BTH 才能重新初始化共享协议状态。
+
+M55 TCM 还涉及物理 RAM bank 映射。REPARK 恢复操作在对端保持复位时临时访问资源契约指定的
+三个物理字，随后恢复 selector；这些字及其所在 bank 不是额外空闲内存。
+静态 DTS 检查补充 ELF 和物理 bank 审计，不替代后者。
+
+### 新增资源使用者
+
+为新 GPIO/UART 实例先确定所有者、clock/reset 依赖、引脚组、电平、本核 IRQ 路由及与 M55 恢复的关系。
+未知板级映射仍保持未知；相似参考板不能证明当前板连接器接线或电气电平。
+
+频率查询、门控和共享根时钟重配是不同操作。运行期服务需要明确调用上下文、有界失败及并发规则，
+空实现不能返回成功来宣称硬件能力。当前 bootstrap HAL ABI 面向 BTH，不能由 M55 直接调用。
+UART 交接需要发送排空、IRQ/状态所有权移交及唯一运行期写入者，并保留早期和 fatal 诊断。
+通用 GPIO/pinctrl、电源域控制及系统 PM 仍需要独立实现和实板验证。
