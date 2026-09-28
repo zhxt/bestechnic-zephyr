@@ -6,39 +6,35 @@
 
 ## Runtime resource interface design
 
-This section defines the implementation boundary for resource services; it does
-not declare additional APIs or drivers available. The public HAL header remains
-a bootstrap interface. The first runtime consumer is BTH UART0; GPIO resources
-need an identified instance and confirmed board wiring. M55 does not gain direct
-access to the BTH library or shared CMU/PSC/PMU/IOMUX through this design.
+This section specifies the resource-service design. Available APIs and drivers
+are defined by the public headers and [supported features](hardware/bes2700yp.md#supported-features).
+The design covers BTH UART0 and explicitly assigned GPIO resources; GPIO use
+requires an identified instance and confirmed board wiring. M55 does not gain
+direct access to the BTH library or shared CMU/PSC/PMU/IOMUX through this design.
 
-### Minimum operations and HAL gaps
+### Resource operations
 
-Operation names below describe responsibilities, not assigned ABI numbers or
-exported C symbols. Use project resource IDs for reviewed instances; never expose
+Operation names below describe responsibilities, not exported C symbols.
+Use project resource IDs for reviewed instances; never expose
 vendor enumeration values, arbitrary register addresses or unrestricted masks.
 
-| Operation | Required behavior | Implementation prerequisite |
+| Operation | Required behavior | Access boundary |
 |---|---|---|
-| Capability query and snapshot | Report available operations and valid clock/gate/reset/pin fields without changing hardware | Retained bridge discovery and explicitly valid fields; existing clock checks and snapshots cover only part of this state |
+| Capability query and snapshot | Report available operations and valid clock/gate/reset/pin fields without changing hardware | Retained bridge discovery and explicitly valid fields |
 | UART input-rate query | Decode the selected source/divider; validate the expected rate | A HAL facade with register-backed readback; a constant alone does not establish the current rate |
 | Peripheral gate on/off | Operate only reviewed leaf gates and check their resulting state | Restricted facade, ownership checks and bounded access; UART0 remains on while serving logs |
 | Peripheral reset assert/deassert/status | Affect only the owned instance after its users stop | Restricted facade with readback; active logging UART, M55 CPU and shared domains are not general reset targets |
 | Pin state query/apply | Validate the whole group, owner and dependencies; read back mux/pull fields | Real readback and bounded hardware-lock handling; preserve unrelated fields and account for chip revision |
-| GPIO data and IRQ | Support one confirmed instance through a Zephyr driver | Register semantics, pad mapping, clock/reset and interrupt routing review; a vendor header alone is insufficient |
+| GPIO data and IRQ | Operate an assigned instance through a Zephyr driver | Confirmed register semantics, pad mapping, clock/reset and interrupt routing; data and IRQ paths stay in the driver |
 
-CMU gate/reset primitives exist in the HAL library but are not a supported public
-runtime resource ABI. Pin-function readback currently returns a placeholder;
-UART voltage setters do not implement switching, and a successful generic voltage
-call does not establish a digital pad's electrical level. IOMUX locking contains
-an unbounded hardware-lock wait under a local interrupt mask. These paths require
-reviewed implementations before runtime use, not a wrapper that merely forwards
-their return values. GPIO direction/IRQ setup implementations are absent from the
-delivered libraries even though vendor declarations exist.
+Hardware readback must reflect actual registers. A successful configuration call
+does not establish a digital pad's electrical level; record that separately from
+the board definition and measurements. Hardware-lock waits must be bounded in the
+backend itself, rather than timed only after an unbounded call returns.
 
 Keep voltage switching, root-clock changes, DVFS, domain power-off, M55 reset,
 RAM remapping and release of bootstrap timer/mailbox reservations outside the
-initial resource API. A valid unsupported operation returns an explicit error.
+resource interface defined here. A valid unsupported operation returns an explicit error.
 Do not introduce a successful no-op to satisfy a Zephyr interface.
 
 ### Calling context and failure contract
@@ -56,8 +52,8 @@ Check the pinned Zephyr API's context contract for each adapter. In particular,
 `clock_control_off()` is non-blocking and callable from any context. Its supported
 path must use a bounded try-acquire and short hardware operation; contention may
 fail immediately. Do not implement it using a sleeping mutex or an asynchronous
-request that reports completion before the gate is off. Until this can be proved,
-leave that operation unsupported. Sleepable setup may have a separate bounded
+request that reports completion before the gate is off. An operation that cannot
+meet this contract remains unsupported. Sleepable setup may have a separate bounded
 thread path. Pin reconfiguration and multi-step reset are not ISR operations;
 UART/GPIO data and IRQ handling stay in the Zephyr driver.
 
@@ -81,7 +77,7 @@ faulted and reject further mutations. Never repair a local failure by resetting
 a shared domain. Bound polling by both an audited timebase and an iteration cap
 so a stopped timer cannot leave an infinite loop.
 
-### UART adoption and implementation sequence
+### UART ownership
 
 UART0 begins bootstrap-owned. The intended transition is bootstrap-owned →
 adopting → Zephyr-owned, with a fault state for uncertain hardware. Adoption first
@@ -100,13 +96,10 @@ interrupted writer; preserve a memory diagnostic when serial output is unavailab
 Internal loopback also excludes normal writers and restores external mode before
 printing its saved result. It does not establish connector wiring or I/O voltage.
 
-Implement in reviewable steps: discovery and read-only snapshots; bounded HAL
-facades; Zephyr resource adapters and exact static grants; UART adoption; then
-GPIO input/output, pulls and interrupts. Each grant needs a legal-use test and a
-conflict test. GPIO reset/gating must account for other users of the same bank.
-First implement a default pin state; sleep states and system PM need their own
-contracts. [Architecture](architecture.md#resource-service-extension-design)
-defines bridge placement and ABI review; [testing](testing.md) defines evidence.
+Each resource grant needs a legal-use test and a conflict test. GPIO reset/gating
+must account for other users of the same bank. Default pin configuration does not
+grant sleep-state or system-PM capabilities. [Architecture](architecture.md#resource-service-extension-design)
+defines the bridge and ABI; [testing](testing.md) defines validation evidence.
 
 ## Version matching
 
