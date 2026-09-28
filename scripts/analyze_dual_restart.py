@@ -8,7 +8,8 @@ from pathlib import Path
 import analyze_boot_profile as profile
 from analyze_dual_boot import prefix_contract
 from analyze_dual_message import FIELDS
-from validation_profiles import validate_manifest
+from validation_profiles import validate_manifest, layered
+import analyze_observation as observation
 from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 LIFECYCLE = dict(layout=0x000a0004, address=0x2015e280, bytes=128, rounds=11,
@@ -31,6 +32,7 @@ PREFIX=re.compile(r'(NA|\d+)/([IE])/BTH/([A-Z0-9]+)/([A-Z]+) \| (zephyr_\w+) (.+
 class Restart:
     @staticmethod
     def analyze(text,m, *, continuation=False, ram_mapping=None, round_start=1, end_step=None):
+        observing=layered(m)
         errors=[];missing=[];boot=[];rows=[];samples=[];last_time=None;ended=False
         expected_boot=[('begin',dict(version=1,test=8,build=int(m['build'],0))),
             ('stage',dict(stage='adapter_ready')),('adapter',dict(cpuid=0x630f1321,ipsr=0,control=0)),
@@ -87,12 +89,13 @@ class Restart:
             expected += [('event',n,1)]+([('repark',n,7)] if n else [])+[('event',n,x) for x in (2,3)]+[('reset',n,3),('event',n,4),('ready',n,None)]+[('endpoint',n,x) for x in (0,1)]+[('peer',n,None)]+[('event',n,x) for x in (5,6)]+[('reset',n,4),('event',n,7),('hardware',n,None),('event',n,8),('session',n,None)]
         if continuation and end_step is not None:
             expected=expected[:expected.index(('event',round_start,end_step))+1]
-        if not continuation:expected += [('result',None,None)]
+        if not continuation and not observing:expected += [('result',None,None)]
         actual=[(r['kind'],r['fields'].get('round'),r['fields'].get('step' if r['kind']=='event' else 'op' if r['kind'] in ('reset','repark') else 'side')) for r in rows]
         if actual!=expected[:len(actual)]:errors.append('lifecycle order/missing/duplicate')
         if len(rows)!=len(expected):missing.append('lifecycle incomplete')
         if not continuation and boot!=expected_boot:missing.append('boot incomplete')
-        if not continuation and len(samples)!=601:missing.append(f'samples {len(samples)}/601')
+        if not continuation and not observing and len(samples)!=601:missing.append(f'samples {len(samples)}/601')
+        if not continuation and observing and not samples:missing.append('samples')
         if continuation and (boot or samples):errors.append('unexpected continuation boot/sample')
         if m.get('lifecycle_log')!=LOG_CONTRACT:errors.append('lifecycle log contract')
         if m.get('restart_version')!=4 or m.get('restart_rounds')!=(2 if continuation else 11) or m.get('restart_target')!=1000 or m.get('dual_layout')!='0x000a0004' or m.get('duration_seconds')!=600 or m.get('lifecycle')!=LIFECYCLE or m.get('reset_diagnostic')!=RESET_DIAGNOSTIC or m.get('repark_diagnostic')!=REPARK_DIAGNOSTIC:errors.append('manifest contract')
@@ -174,19 +177,19 @@ class Restart:
         s=dict(status=status,errors=errors,missing=missing,records=rows,samples=samples)
         return dict(status=status,session_count=1,sessions=[s])
 
-def analyze(text,manifest):
+def analyze(text,manifest,scope='long'):
     try:
         validate_manifest(manifest, restart=True)
     except ValueError as error:
         return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
-    previous=profile.dual
-    try:profile.dual=Restart;return profile.analyze(text,manifest)
-    finally:profile.dual=previous
+    return observation.run(profile, text, manifest, Restart.analyze, scope)
+
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('log',type=Path)
     ap.add_argument('--manifest',type=Path,required=True);ap.add_argument('--output',type=Path)
-    a=ap.parse_args();r=analyze(a.log.read_bytes().decode('latin1'),json.loads(a.manifest.read_text()))
+    ap.add_argument('--scope',choices=observation.NAMES,default='long')
+    a=ap.parse_args();r=analyze(a.log.read_bytes().decode('latin1'),json.loads(a.manifest.read_text()),a.scope)
     text=json.dumps(r,indent=2)+'\n'
     if a.output:a.output.write_text(text)
     print(text,end='');return {'pass':0,'fail':1,'incomplete':2}[r['status']]

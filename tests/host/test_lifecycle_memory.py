@@ -18,6 +18,7 @@ class LifecycleMemory(unittest.TestCase):
             root = Path(temporary)
             for name in ('platforms/bes2700yp/resources.json',
                          'include/bestechnic/bes2700yp/bes2700_lifecycle.h',
+                         'include/bestechnic/bes2700yp/bes2700_observation.h',
                          'include/bestechnic/bes2700yp/bes2700_dual_boot.h'):
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,8 @@ import analyze_boot_profile as profile
 from analyze_dual_boot import prefix_contract
 from analyze_dual_restart import PREFIX, RESET_FIELDS, RESET_DIAGNOSTIC, LIFECYCLE, Restart
 from analyze_dual_message import FIELDS as ENDPOINT_FIELDS
-from validation_profiles import validate_manifest
+from validation_profiles import validate_manifest, layered
+import analyze_observation as observation
 from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 FIELDS = {
@@ -30,6 +31,7 @@ class Isolation:
     @staticmethod
     def analyze(text, m, *, terminal=True):
         errors, missing, boot, rows, samples = [], [], [], [], []
+        observing = layered(m)
         case = m.get('fault_case')
         expected_boot = [
             ('begin', dict(version=1, test=8, build=int(m['build'], 0))),
@@ -136,7 +138,7 @@ class Isolation:
             expected.append(('fault_context', None))
         expected += [('detected', None), ('reset', 4), ('isolated', None),
                      ('hardware', None)]
-        if terminal:
+        if terminal and not observing:
             expected += [('held', None), ('isolation_result', None)]
         actual = [(r['kind'], r['fields'].get('step' if r['kind'] == 'event' else 'op'))
                   for r in rows]
@@ -146,8 +148,10 @@ class Isolation:
             missing.append('isolation incomplete')
         if boot != expected_boot:
             missing.append('boot incomplete')
-        if len(samples) != 601:
+        if not observing and len(samples) != 601:
             missing.append(f'samples {len(samples)}/601')
+        if observing and not samples:
+            missing.append('samples')
         origin = release = detected = None
         elapsed = 0
         for r in rows:
@@ -278,19 +282,14 @@ class Isolation:
         return dict(status=status, session_count=1, sessions=[session])
 
 
-def analyze(text, manifest):
+def analyze(text, manifest, scope='long'):
     try:
         scenario = validate_manifest(manifest, restart=True, isolation=True)
         if manifest.get('fault_case') != scenario.fault_case:
             raise ValueError('fault case/profile mismatch')
     except ValueError as error:
         return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
-    previous = profile.dual
-    try:
-        profile.dual = Isolation
-        return profile.analyze(text, manifest)
-    finally:
-        profile.dual = previous
+    return observation.run(profile, text, manifest, Isolation.analyze, scope)
 
 
 def main():
@@ -298,8 +297,9 @@ def main():
     ap.add_argument('log', type=Path)
     ap.add_argument('--manifest', type=Path, required=True)
     ap.add_argument('--output', type=Path)
+    ap.add_argument('--scope', choices=observation.NAMES, default='long')
     args = ap.parse_args()
-    result = analyze(args.log.read_bytes().decode('latin1'), json.loads(args.manifest.read_text()))
+    result = analyze(args.log.read_bytes().decode('latin1'), json.loads(args.manifest.read_text()), args.scope)
     text = json.dumps(result, indent=2) + '\n'
     if args.output:
         args.output.write_text(text)

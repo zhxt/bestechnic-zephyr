@@ -19,11 +19,13 @@ python release/analyze_dual_restart.py current_boot.cap \
 应有 11 个 READY、22 条 endpoint、11 条 peer 健康摘要、11 次复位硬件快照及 session 结果，
 以及 22 条 reset 采样记录（每会话 RELEASE/STOP 各一条）。
 每个方向 sent=acked=对端 handled=1000，错误、意外拒绝、伪中断为零；每轮停止确认
-peer_idle/reset_held/channel_clean，全程有 601 条 BTH 心跳。分析器返回 0/1/2 分别表示
+peer_idle/reset_held/channel_clean，并保持连续健康采样。分析器返回 0/1/2 分别表示
 通过/失败/不完整。测试必须针对相同候选身份，不沿用先前镜像的实板结论。
 
-BTH 观察时长 600 秒。11 会话可能提前完成，随后 M55 保持 CPU 复位；不是 600 秒双核流量。
-首轮关注第二个 session 是否能启动，完整通过后再做两轮断电重复验证。
+按[分层观察范围](testing.zh-CN.md#分层观察范围)区分功能结果、功能完成后至少 60 秒短观察和长观察。
+每个窗口末端重新确认本地 worker 静止、M55 复位和 mailbox 状态；分析器默认长范围。
+11 会话完成后 M55 保持复位，观察不代表持续双核流量。首轮关注第二个 session 能否启动，
+完成全部会话和计划范围后，再按冻结矩阵安排断电重复验证。
 修改公共 worker/mailbox/启动服务后还应回归 `ipc-backpressure`、`ipc-fault-injection` 和 `ipc-backpressure-1h`。
 
 ## 所有权及失败边界
@@ -67,7 +69,7 @@ reason、轮询/采样/尝试次数、末次 a/b、最大差值、elapsed tick�
 外部函数，并验证中断保护与真实调用关系。主机测试执行实际 C 采样及服务代码，覆盖
 差值阈值、回绕、最后一次成功、重试耗尽、中断状态恢复和失败时保持对端复位。
 主机模型与 ELF 审计不能证明真实总线时序；冷启动须观察首次 RELEASE、M55 READY、
-session 2，再完成 11 会话和 600 秒 BTH 观察。
+session 2，再完成 11 会话和计划范围的 BTH 观察。
 
 消息和重启场景共用 `platforms/bes2700yp/boot/service_contract.c` 校验服务入口。
 Flash 代码执行窗口为 `0x14000000..0x14800000`，与 `0x34000000` 下载/装载视图不同；
@@ -138,7 +140,8 @@ selector 在 AXI 阶段改变，三个字及恢复结果逐项正确。缺失记
 后续步骤。无需对端 QUIESCE 确认，不在复位态读取 DTCM，不执行 REPARK、重新装载、
 业务重放或自动重试。CPU reset 不能证明其他总线主设备已停止，本场景不启用 DMA。
 
-隔离后 BTH 继续观察，累计从监测开始的 600 秒、601 条 sample；结束时再次确认
+隔离后 BTH 继续至少 60 秒短观察，再继续至短窗口终点与 monitor 启动后 600 秒的较晚者。
+两个检查点分别再次确认
 M55 保持复位，通道 1 两端的原始通知/完成标志已清除。预期 reason 为 1（READY 超时）
 或 2（心跳停止）；意外故障或隔离失败即使 BTH 仍存活也不能通过验收。
 
@@ -150,9 +153,9 @@ python release/analyze_dual_isolation.py current_boot.cap \
 ```
 
 分析器核对注入标记、检测时间、RELEASE/STOP 复位诊断、本地静止/复位保持/通道清理、
-完整 BTH 观察及 `isolation_result pass=1`，并要求 releases=1、recoveries=0。
-退出码 0/1/2 表示通过/失败/不完整，不能只看最后一行判定通过。里程碑验收时每场景
-保存三次独立物理断电上电记录，先检查首轮完整结果，再做重复测试。串口日志不能证明
+所选范围的完整 BTH 观察及版本化的 `zephyr_observe` 功能/检查点证据，并要求 releases=1、recoveries=0。
+退出码 0/1/2 表示通过/失败/不完整，不能只看最后一行判定通过。实板前依据
+[验证矩阵](testing.zh-CN.md#分层观察范围)冻结每场景的范围及轮次，先检查首轮，再做重复测试。串口日志不能证明
 物理断电，操作方式需单独记录。主机测试覆盖期限、隔离各步失败、真实 worker 的终止门控、
 mailbox 寄存器模型及解析器负例，不能代替真实复位和总线时序验证。
 
@@ -172,7 +175,7 @@ mailbox 寄存器模型及解析器负例，不能代替真实复位和总线时
 旧请求和通知被丢弃，不自动重放业务；当前验证应用没有外部调用者或请求取消接口。
 
 session 2 必须双向各完成 1000 条消息、核对 M55 健康状态，再完成正常协作的
-QUIESCE/复位/通道清理。随后 M55 保持复位，BTH 从监测开始累计观察 600 秒。
+QUIESCE/复位/通道清理。随后 M55 保持复位，BTH 依次产生短、长观察检查点。
 这验证恢复通信及正常收尾，不表示 600 秒双核流量。原有两个隔离场景继续保持最终隔离行为。
 
 REPARK、worker 重建、装载、释放、READY 或通信任一步失败，都禁止后续恢复步骤。
@@ -189,13 +192,13 @@ python release/analyze_dual_recovery.py current_boot.cap \
 
 分析器要求原故障及隔离证据、唯一的
 `recovery_begin old_session=1 new_session=2 limit=1`、REPARK 读回、`worker_rebuilt`、
-session 2 的 READY、两端完整消息计数和正常停止结果。最终复位/通道检查及 601 条
-BTH sample 后，才允许 `recovery_result pass=1 session=2 releases=2 attempts=1 recoveries=1`
-通过；reason 必须匹配，rc 必须为零。缺失步骤、旧会话或未完成观察均不能通过。
+session 2 的 READY、两端完整消息计数和正常停止结果。功能记录要求 session=2、releases=2、
+attempts=1、recoveries=1；检测 reason 必须匹配，rc 必须为零。每个短/长 `zephyr_observe result`
+均需完整窗口、连续健康样本及新的末端复位/通道检查。缺失步骤、旧会话或未完成所选范围均不能通过。
 隔离及正常重启分析器会拒绝恢复场景。
 
-先检查每个场景一轮完整冷启动。里程碑候选冻结后，再为每个恢复场景收集三轮独立
-物理断电启动和受影响的公共路径回归。主机模型覆盖真实 worker 通信中途终止、带残留
+先按计划范围检查每个场景一轮冷启动。里程碑候选和矩阵冻结后，再收集约定的重复
+物理断电启动及受影响公共路径回归。主机模型覆盖真实 worker 通信中途终止、带残留
 信号的重建、新会话隔离、单次预算及失败门控、解析器负例；实际寄存器时序和恢复能力
 仍须使用关联镜像 SHA256 的实板证据确认。
 
@@ -223,11 +226,12 @@ fatal 发布缺失时只能确认心跳超时，不能声称已解析具体异�
 REPARK/装载失败场景注入的是软件操作错误，不会破坏硬件 selector，也不能据此声明
 真实 RAM/读回故障已经完成实板验收。复位服务错误及映射失败门控仍由主机模型和离线
 检查覆盖；真实硬件失败需另有证据。意外隔离失败仍判为失败，BTH 存活不能代替成功隔离。
-失败场景要求 `recovery_failed`、`retry_blocked`、最终 held/通道检查，以及
-`recovery_failure_result pass=1 attempts=1 recoveries=0`。这里的通过表示预期失败已被
-正确隔离，不表示 M55 恢复成功；不能使用成功恢复的结果行替代。
-两类结果都仍要求 601 条样本及完整 600 秒 BTH 观察，本批不启用缩短验收范围。
+失败场景要求 `recovery_failed`、`retry_blocked`，功能记录中的 attempts=1、recoveries=0，
+以及所选观察窗口和末端 held/通道检查。这里的通过表示预期失败已被正确隔离，不表示 M55 恢复成功；
+分析器按场景检查计数，不能使用成功恢复证据替代。短窗口从拒绝重试检查完成后计算至少 60 秒，
+长窗口还须满足从 monitor 启动起至少 600 秒。
 
 生命周期日志采用 `BTH/LIFECYCLE/MAIN` 和 `zephyr_lifecycle`，包内 `lifecycle_log`
 声明文本格式 version=2；正常重启协议 version=4 及共享内存 ABI 保持不变。
-历史日志保留原包分析器，新分析器拒绝混用旧、新命名空间。
+观察事件使用独立的 `BTH/OBSERVE/MAIN`、`zephyr_observe` 命名空间，由包内 observation 合同约束。
+历史日志保留原包分析器及原有结果格式、601 样本完整验收规则。

@@ -7,7 +7,8 @@ from pathlib import Path
 import analyze_boot_profile as profile
 from analyze_dual_isolation import Isolation
 from analyze_dual_restart import PREFIX, Restart, RESET_FIELDS
-from validation_profiles import validate_manifest
+from validation_profiles import validate_manifest, layered
+import analyze_observation as observation
 from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 
@@ -15,6 +16,7 @@ class Recovery:
     @staticmethod
     def analyze(text, manifest):
         errors, missing, initial, continuation, records = [], [], [], [], []
+        observing = layered(manifest)
         phase = 0
         previous_initial = previous_continuation = None
         begin_time = held_time = sample_time = last_time = None
@@ -124,7 +126,9 @@ class Recovery:
                 previous_continuation = (kind, d.get('step'))
             else:
                 errors.append('unexpected recovery record')
-        if phase != 3:
+        expected_last = ('retry_blocked', None) if fail_step else ('session', None)
+        complete = (phase == 1 and previous_continuation == expected_last) if observing else phase == 3
+        if not complete:
             missing.append('recovery incomplete')
         if not rebuilt and fail_step!=1:
             missing.append('worker rebuild missing')
@@ -198,7 +202,7 @@ class Recovery:
         return dict(status=status, session_count=1, sessions=[session])
 
 
-def analyze(text, manifest):
+def analyze(text, manifest, scope='long'):
     try:
         scenario = validate_manifest(manifest, restart=True, isolation=True, recovery=True)
         if (manifest.get('fault_case') != scenario.fault_case
@@ -206,12 +210,7 @@ def analyze(text, manifest):
             raise ValueError('fault case/profile mismatch')
     except ValueError as error:
         return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
-    previous = profile.dual
-    try:
-        profile.dual = Recovery
-        return profile.analyze(text, manifest)
-    finally:
-        profile.dual = previous
+    return observation.run(profile, text, manifest, Recovery.analyze, scope)
 
 
 def main():
@@ -219,8 +218,9 @@ def main():
     parser.add_argument('log', type=Path)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--scope', choices=observation.NAMES, default='long')
     args = parser.parse_args()
-    result = analyze(args.log.read_bytes().decode('latin1'), json.loads(args.manifest.read_text()))
+    result = analyze(args.log.read_bytes().decode('latin1'), json.loads(args.manifest.read_text()), args.scope)
     content = json.dumps(result, indent=2) + '\n'
     if args.output:
         args.output.write_text(content)

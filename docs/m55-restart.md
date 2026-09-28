@@ -3,7 +3,7 @@
 [简体中文](m55-restart.zh-CN.md)
 
 The `m55-restart` validation profile starts both Zephyr images, then stops and
-restarts only the M55 CPU ten times. BTH stays running for 600 seconds. The
+restarts only the M55 CPU ten times. BTH stays running through the selected observation scope. The
 initial start and ten restarts produce 11 sessions; each session exchanges
 1,000 messages in each direction with payload lengths from 0 through 96 bytes.
 The operation retains RAM, clocks and power. It validates a cooperative normal
@@ -24,14 +24,17 @@ python release/analyze_dual_restart.py current_boot.cap \
 The analyzer requires 11 READY records, 22 endpoint records, 11 healthy peer
 snapshots, 11 reset hardware snapshots and 11 session results. It also checks
 22 reset timer diagnostics (RELEASE and STOP for each session), ten REPARK
-records, 601 BTH heartbeat samples, message accounting, and final guards.
+records, continuous BTH heartbeat samples, message accounting, and final guards.
+The [observation scopes](testing.md#observation-scopes) distinguish functional
+completion, a further 60-second short window, and long observation. Each window
+ends with a fresh local-idle/reset/mailbox check. The default analyzer scope is long.
 Each direction must have `sent=acked=peer handled=1000`; unexpected rejections,
 protocol errors and spurious mailbox interrupts must remain zero. Analyzer
 exit codes 0, 1 and 2 mean pass, fail and incomplete respectively.
 
 The first board check should confirm that session 2 starts after the first
-M55 stop. After one complete 11-session and 600-second run, repeat with two
-independent physical power cycles. Rerun affected message profiles when shared
+M55 stop. Complete all 11 sessions and the planned observation scope, then repeat
+physical cold boots according to the frozen validation matrix. Rerun affected message profiles when shared
 startup, mailbox or worker behavior changes. The result belongs to the exact
 image SHA256 and package; previous firmware hardware reports do not validate this
 new candidate.
@@ -135,8 +138,9 @@ There is no QUIESCE acknowledgement requirement, DTCM snapshot while held reset,
 REPARK, reload, business replay, or automatic retry. CPU reset does not stop
 other bus masters; these profiles do not enable DMA.
 
-After isolation, the existing monitor continues to 601 samples over 600 seconds
-from the start of BTH observation. Final checks confirm reset is still held and
+After isolation, the monitor continues for a short window of at least 60 seconds,
+and then to the later of that endpoint and 600 seconds from monitor start.
+Both checkpoints confirm reset is still held and
 both channel-1 raw notification/completion flags are clear. Expected fault
 reasons are 1 (READY timeout) and 2 (heartbeat timeout); an unexpected fault or
 containment failure is a failed test even if BTH continues running.
@@ -150,11 +154,11 @@ python release/analyze_dual_isolation.py current_boot.cap \
 
 Acceptance requires the matching injection marker, bounded detection, RELEASE
 and STOP reset diagnostics, local-idle/reset-held/channel-clean evidence, the
-complete BTH observation, and `isolation_result pass=1` with one release and
-zero recoveries. The analyzer returns 0/1/2 for pass/fail/incomplete. A result
-line alone is insufficient. Archive three independent physical cold boots per
-profile for milestone acceptance; first inspect one complete run before doing
-the repeats. Record cold boots separately because serial output cannot prove
+selected BTH observation, and versioned `zephyr_observe` functional/checkpoint
+evidence with one release and zero recoveries. The analyzer returns 0/1/2 for pass/fail/incomplete. A result
+line alone is insufficient. Freeze the scope and number of physical cold boots
+per profile using the [validation matrix](testing.md#observation-scopes); inspect
+one run before doing repeats. Record cold boots separately because serial output cannot prove
 power removal. Host tests exercise policy deadlines, isolation step failures,
 the actual worker's terminal gate, mailbox register behavior, and negative
 parser cases; they do not prove physical reset or bus timing.
@@ -182,7 +186,7 @@ This validation application has no external caller or request-cancellation API.
 
 Session 2 must exchange 1,000 messages in each direction, validate peer health,
 and finish a cooperative QUIESCE/reset/channel-clear cycle. M55 then stays in
-reset while BTH completes 600 seconds of observation from monitor startup.
+reset while BTH produces short and long observation checkpoints.
 This checks recovered communication followed by normal shutdown; it is not a
 600-second dual-core traffic test. The original isolation-only profiles retain
 their terminal behavior.
@@ -204,14 +208,14 @@ python release/analyze_dual_recovery.py current_boot.cap \
 The analyzer requires the original fault and isolation evidence, a single
 `recovery_begin old_session=1 new_session=2 limit=1`, REPARK readback,
 `worker_rebuilt`, session-2 READY, two complete endpoint reports and its healthy
-shutdown. Final reset/channel checks and 601 BTH samples must precede
-`recovery_result pass=1 session=2 releases=2 attempts=1 recoveries=1` (with the
-matching reason and zero rc). It rejects missing steps, stale sessions and
+shutdown. Functional evidence must report session=2, releases=2, attempts=1 and
+recoveries=1 with the matching detected reason and zero rc. Each short/long
+`zephyr_observe result` requires its full window and a fresh held/channel check. It rejects missing steps, stale sessions and
 incomplete observation. The isolation and restart analyzers reject these profiles.
 
-Inspect one complete cold boot per profile first. Freeze the milestone candidate
-before collecting three independent physical cold boots per recovery profile
-and the affected shared-path regressions. Host models test aborting the actual
+Inspect one cold boot per profile first, using the planned scope. Freeze the
+milestone candidate and matrix before collecting repeated cold boots and the
+affected shared-path regressions. Host models test aborting the actual
 worker during traffic, recreating it with stale local signals, session isolation,
 one-attempt and failure gates, and parser rejection cases; register timing and
 physical recovery still require board evidence tied to the image SHA256.
@@ -247,13 +251,16 @@ Actual reset-service errors and failed mapping gates remain covered by host
 models and offline checks, with hardware failures requiring separate evidence.
 Any unexpected containment failure remains a failing run; BTH liveness alone
 cannot turn it into success. Failure profiles require `recovery_failed`,
-`retry_blocked`, final held/channel checks and
-`recovery_failure_result pass=1 attempts=1 recoveries=0`. This means the
-expected failure was contained, not that M55 recovered. They cannot pass through
-the successful-recovery result path. Both outcomes still require 601 samples
-and the full 600-second BTH observation; no shorter acceptance scope is enabled.
+`retry_blocked`, attempts=1 and recoveries=0 in functional evidence, followed by
+the selected observation window and a fresh held/channel check. This means the
+expected failure was contained, not that M55 recovered. The analyzer checks
+scenario-specific counters and cannot substitute successful-recovery evidence.
+Short acceptance requires the full 60 seconds after the retry-denial check;
+long acceptance also reaches at least 600 seconds from monitor start.
 
 Lifecycle records use `BTH/LIFECYCLE/MAIN` and `zephyr_lifecycle`; package
 `lifecycle_log` declares text format version 2. Normal-restart protocol version 4
 and the shared-memory ABI are unchanged. Keep old logs with their original
-package analyzer; mixed namespaces are rejected by the current analyzer.
+package analyzer. Observation events use the separate `BTH/OBSERVE/MAIN` and
+`zephyr_observe` namespace under the package observation contract. Legacy
+packages retain their original final results and 601-sample acceptance rules.

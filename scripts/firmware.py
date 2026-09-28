@@ -22,7 +22,7 @@ from pack_m55_payload import parse_entry, parse_load_segments, run_readelf
 from project_files import file_hashes
 from module_lock import check_lock, check_modules
 from package_source import hal_files, repository_state, require_clean, snapshot
-from validation_profiles import (IDENTITY_SCHEMA, VALIDATION_SCHEMA, PROFILES,
+from validation_profiles import (IDENTITY_SCHEMA, VALIDATION_SCHEMA, PROFILES, observation_contract,
                                  get_profile, validate_identity, cmake_settings)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +66,7 @@ def configure(a):
     identity = dict(schema=IDENTITY_SCHEMA, chip='bes2700yp',
                     validation_schema=VALIDATION_SCHEMA, validation_profile=a.profile, mode=mode,
                     duration=duration, heartbeat=scenario.heartbeat,
+                    observation=observation_contract(a.profile),
                     sources=sources, hal_release=sha(a.hal / 'manifest.json'),
                     modules=modules, compiler=compiler)
     if scenario.m55_restart:
@@ -271,6 +272,7 @@ def final(a):
         heartbeat_schedule='absolute_ms', heartbeat_period_ms=100, heartbeat_max_late_ms=20,
         message_version=2, message_layout=0x00090001, message_mode=identity['mode'],
         validation_schema=VALIDATION_SCHEMA, validation_profile=identity['validation_profile'],
+        observation=identity['observation'],
         message_seconds=identity['duration'], message_pair=identity['pair'],
         progress_period=10, message_region=[0x2015c000,0x2015e000], profile_version=1, profile_variant=2,
         profile_id=f'0x{identity["profile"]:08x}', profile_points=12, profile_sampler=syms['bootprof_mark'] | 1,

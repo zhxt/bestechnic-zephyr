@@ -7,6 +7,7 @@
 #include "m55_payload.h"
 #include "message.h"
 #include <bes2700_dual_doorbell.h>
+#include <bes2700_observation.h>
 #define SECONDS CONFIG_DUAL_DURATION_SECONDS
 BUILD_ASSERT(SECONDS==(CONFIG_DUAL_MSG_MODE!=2?600:CONFIG_DUAL_IPC_SECONDS+10));
 _Static_assert(BTH_LOG_ADDR >= DUAL_HW_ADDR + sizeof(struct dual_hw), "log/hardware overlap");
@@ -23,12 +24,51 @@ static void finish(uint32_t samples, uint32_t rc)
 {
  q_stop();
  k_timer_stop(&timer);
- bth_log_begin(rc?'E':'I',"KERN","MAIN");
- bth_puts("zephyr_dual result"); field(" pass=",rc==0); field(" samples=",samples); field(" rc=",rc); bth_end();
+ if(CONFIG_DUAL_MSG_MODE==2 || rc) {
+  bth_log_begin(rc?'E':'I',"KERN","MAIN");
+  bth_puts("zephyr_dual result");field(" pass=",rc==0);field(" samples=",samples);field(" rc=",rc);bth_end();
+ }
  /* Do not touch shared RAM after stopping the peer. Power remains enabled. */
  if (parked && service) { (void)service(DUAL_STOP,0); }
  /* The periodic clock sampler has stopped; future faults must print NA. */
  bth_log_reset();
+}
+static void observe_begin(const char *kind, uint32_t rc)
+{
+ bth_log_begin(rc?'E':'I',"OBSERVE","MAIN");bth_puts("zephyr_observe ");bth_puts(kind);
+}
+/* Workers have finished. Read the actual AXI publications again, including
+ * their seqlocks, instead of accepting only the cached final report. */
+static int observe_traffic(const struct q_report *report)
+{
+ if(!report->finished || report->rc || !report->session) { return 95; }
+ for(unsigned side=0;side<2;side++) {
+  volatile struct bi_ring *ring=(void *)(uintptr_t)(BI_BASE+4096U*side);
+  if(!bi_guards_ok(ring) || ring->head!=ring->tail) { return 95; }
+  volatile struct q_state *shared=&ring->state;
+  struct q_state copy;uint32_t seq=shared->seq;__DMB();
+  if(seq&1) { return 95; }
+  uint32_t *d=(void *)&copy;volatile uint32_t *src=(void *)shared;
+  for(unsigned i=0;i<sizeof(copy)/4;i++) { d[i]=src[i]; }
+  __DMB();if(seq!=shared->seq || copy.seq!=seq) { return 95; }
+  const struct q_state *expected=side?&report->m55:&report->bth;
+#define CHECK_TERMINAL(n) if(copy.n!=expected->n) { return 95; }
+  Q_FIELDS(CHECK_TERMINAL)
+#undef CHECK_TERMINAL
+  if(copy.error || copy.guard!=Q_META_GUARD) { return 95; }
+ }
+ return 0;
+}
+static int observe_checkpoint(struct bes_observation *o, unsigned scope, uint32_t ms,
+                              uint32_t samples, const struct q_report *report)
+{
+ int rc=observe_traffic(report);
+ observe_begin("traffic",rc);field(" scope=",scope);field(" session=",report->session);
+ field(" finished=",report->finished);field(" live=",!rc);field(" rc=",rc);bth_end();
+ observe_begin("result",rc);field(" version=",BES_OBSERVATION_VERSION);field(" scope=",scope);
+ field(" pass=",!rc);field(" session=",report->session);field(" functional_ms=",o->functional_ms);
+ field(" ms=",ms);field(" samples=",samples);field(" rc=",rc);bth_end();
+ return rc;
 }
 static int read_peer(struct dual_status *s)
 {
@@ -148,14 +188,15 @@ int main(void)
  bth_puts("zephyr_msg begin version=2 channel=1");field(" duration=",CONFIG_DUAL_IPC_SECONDS);
  field(" progress_period=",10);field(" mode=",CONFIG_DUAL_MSG_MODE);field(" layout=",Q_LAYOUT);
  field(" pair=",CONFIG_DUAL_CC_PAIR);field(" depth=",BI_DEPTH);field(" payload=",BI_PAYLOAD);bth_end();
- q_start();bool db_printed=false;
+ q_start();bool db_printed=false;struct bes_observation observation={0};
  uint32_t start_ms=k_uptime_get_32(), start_raw=bth_ticks(), prev_cycles=peer.cycles;
  uint32_t base_peer_ms=peer.ms, base_beat=peer.beat, last_beat=peer.beat;
  uint64_t peer_cycles=0, ticks=0;
  k_timer_start(&timer,K_MSEC(100),K_MSEC(100));
- for (uint32_t i=0;i<=SECONDS;i++) {
+ const uint32_t limit=CONFIG_DUAL_MSG_MODE==2?SECONDS:BES_OBSERVATION_LIMIT_MS/1000;
+ for (uint32_t i=0;i<=limit;i++) {
   if (i) { k_sleep(K_TIMEOUT_ABS_MS((uint64_t)start_ms+i*1000)); }
-  if (i==SECONDS) { k_timer_stop(&timer); }
+  if (CONFIG_DUAL_MSG_MODE==2 && i==SECONDS) { k_timer_stop(&timer); }
   uint32_t elapsed=k_uptime_get_32()-start_ms, raw=bth_ticks();
   ticks+=(uint32_t)(raw-start_raw); start_raw=raw;
   rc=0;
@@ -212,10 +253,26 @@ int main(void)
    bth_log_begin(db.rc?'E':'I',"IPC","MAIN");bth_puts("zephyr_msg result");
    field(" finished=",db.finished);field(" rc=",db.rc);field(" session=",db.session);
    bth_end();db_printed=true;
+   if(CONFIG_DUAL_MSG_MODE!=2 && !db.rc && !rc) {
+    observation.functional_ms=k_uptime_get_32()-start_ms;observation.functional=true;
+    observe_begin("functional",0);field(" version=",BES_OBSERVATION_VERSION);
+    field(" ms=",observation.functional_ms);field(" session=",db.session);field(" rc=",0);bth_end();
+   }
   }
   if(db.finished && db.rc) { rc=92; }
   if(i>=(CONFIG_DUAL_MSG_MODE!=2?590:CONFIG_DUAL_IPC_SECONDS+5) && !db.finished) { rc=93; }
-  if (rc || i==SECONDS) { finish(i+1,rc); return 0; }
+  if(CONFIG_DUAL_MSG_MODE!=2 && !rc) {
+   unsigned scope=bes_observation_due(&observation,elapsed);
+   if(scope) {
+    rc=observe_checkpoint(&observation,scope,elapsed,i+1,&db);
+    observation.short_done=true;
+    if(!rc && scope==1 && bes_observation_due(&observation,elapsed)==2) {
+     scope=2;rc=observe_checkpoint(&observation,scope,elapsed,i+1,&db);
+    }
+    if(scope==2 || rc) { finish(i+1,rc);return 0; }
+   }
+  }
+  if (rc || i==limit) { finish(i+1,rc?rc:CONFIG_DUAL_MSG_MODE==2?0:96); return 0; }
  }
  return 0;
 }

@@ -69,6 +69,15 @@ def check_resource_contract(root):
     resources = json.loads((root / 'platforms/bes2700yp/resources.json').read_text())
     if resources['schema'] != 1 or resources['chip'] != 'bes2700yp':
         raise ValueError('unsupported resource contract')
+    observation = resources.get('observation')
+    if observation != dict(version=1, short_ms=60000, long_ms=600000, limit_ms=660000):
+        raise ValueError('observation resource contract')
+    observation_header = (root / 'include/bestechnic/bes2700yp/bes2700_observation.h').read_text()
+    for key, macro in [('version', 'VERSION'), ('short_ms', 'SHORT_MS'),
+                       ('long_ms', 'LONG_MS'), ('limit_ms', 'LIMIT_MS')]:
+        match = re.search(r'^#define BES_OBSERVATION_' + macro + r' (\d+)U$', observation_header, re.M)
+        if not match or int(match[1]) != observation[key]:
+            raise ValueError('observation header/manifest mismatch: ' + key)
     regions = resources['regions']
     names = [r['name'] for r in regions]
     if len(set(names)) != len(names):

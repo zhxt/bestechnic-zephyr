@@ -4,6 +4,7 @@
 import argparse
 import json
 import re
+from validation_profiles import layered
 from pathlib import Path
 
 TRACE = set('stage cpuid vtor msp psp control primask basepri ccr mpu cpacr cfsr hfsr shcsr mmfar bfar icsr reason msplim psplim pc lr xpsr esf_valid'.split())
@@ -15,6 +16,7 @@ def session(lines, manifest):
     errors, missing, samples, stages = [], [], [], []
     boot = []
     diagnostics, hardware = [], []
+    observing=layered(manifest)
     version=int(manifest.get("log_version",1))
     duration=int(manifest.get("duration_seconds",600))
     begin = peer = result = None
@@ -91,7 +93,7 @@ def session(lines, manifest):
             if not running or len(stages)!=7 or peer is None or set(d)!=SAMPLE or any(v<0 for v in d.values()):
                 errors.append('sample order/fields'); continue
             i=d['id']; cycles=(d['cycles_hi']<<32)|d['cycles_lo']
-            if i!=len(samples) or i>duration: errors.append('sample missing/duplicate/order')
+            if i!=len(samples) or i>(660 if observing else duration): errors.append('sample missing/duplicate/order')
             if d['rc'] or d['guards']!=1 or min(d['bth_stack'],d['m55_stack'])<128: errors.append('error/guard/stack')
             if not i*1000<=d['ms']<=i*1000+100 or abs(d['m55_ms']-d['ms'])>250 or abs(d['timer']-d['ms']//100)>2:
                 errors.append('sleep/timer/peer time drift')
@@ -114,8 +116,9 @@ def session(lines, manifest):
     if boot!=expected_boot: missing.append('boot stages')
     if begin is None or peer is None or len(stages)!=7: missing.append('loader/READY')
     if version>=2 and (len(diagnostics)!=3 or len(hardware)!=3): missing.append('diagnostic checkpoints')
-    if len(samples)!=duration+1: missing.append(f'samples {len(samples)}/{duration+1}')
-    if result is None: missing.append('result')
+    if not observing and len(samples)!=duration+1: missing.append(f'samples {len(samples)}/{duration+1}')
+    if not observing and result is None: missing.append('result')
+    if observing and not samples: missing.append('samples')
     return dict(status='fail' if errors else 'incomplete' if missing else 'pass', errors=errors,missing=missing,
                 samples=len(samples),last_sample=samples[-1] if samples else None,loader_stages=len(stages),peer=peer,diagnostics=diagnostics,hardware=hardware)
 

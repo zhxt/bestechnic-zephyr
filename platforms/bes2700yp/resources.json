@@ -2,6 +2,12 @@
   "schema": 1,
   "chip": "bes2700yp",
   "scope": "dual-core lifecycle; cache disabled; RAM retained",
+  "observation": {
+    "version": 1,
+    "short_ms": 60000,
+    "long_ms": 600000,
+    "limit_ms": 660000
+  },
   "lifecycle": {
     "layout": 655364,
     "address": 538305152,

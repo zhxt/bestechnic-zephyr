@@ -7,6 +7,7 @@
 #include <bes2700_mbox.h>
 #include <bes2700_lifecycle.h>
 #include <bes2700_peer_health.h>
+#include <bes2700_observation.h>
 #include "bth_contract.h"
 #include "m55_payload.h"
 #include "message.h"
@@ -14,9 +15,9 @@ _Static_assert(BES_PEER_READY_MS==BES_LIFECYCLE_READY_MS,"READY budget contract"
 static const struct device *const mailbox=DEVICE_DT_GET(DT_NODELABEL(mbox_peer));
 static int (*service)(uint32_t,uint32_t);
 static uint32_t generation;
-#if CONFIG_BES2700_M55_FAULT_CASE > 0
 static uint32_t releases;
-#endif
+static int64_t monitor_origin;
+static struct bes_observation observation;
 static struct dual_hw retained;
 static volatile uint32_t monitor_samples, monitor_error;
 static volatile uint32_t timer_count;
@@ -44,9 +45,7 @@ static int reset_call(unsigned round,uint32_t op,uint32_t failure)
  BES_RESET_DIAG->op=op;__DMB();
  int rc=service(op,op==DUAL_RELEASE?DUAL_TRAMPOLINE|1U:0);
  BES_RESET_DIAG->service_rc=(uint32_t)rc;__DMB();
-#if CONFIG_BES2700_M55_FAULT_CASE > 0
  if(op==DUAL_RELEASE && !rc) { releases++; }
-#endif
  begin("reset",rc?failure:0);field(" round=",round);field(" session=",generation);
 #define PRINT_RESET(n) field(" " #n "=",BES_RESET_DIAG->n);
  BES_RESET_FIELDS(PRINT_RESET)
@@ -66,12 +65,34 @@ static int repark_call(unsigned round)
 #undef PRINT_PARK
  field(" rc=",rc?12:0);end();return rc;
 }
-/* Independent liveness while manager copies/CRCs peer memory. UART serialized. */
+static void observe_begin(const char *kind, uint32_t rc)
+{
+ k_mutex_lock(&log_lock,K_FOREVER);
+ bth_log_begin(rc?'E':'I',"OBSERVE","MAIN");bth_puts("zephyr_observe ");bth_puts(kind);
+}
+static int observe_checkpoint(unsigned scope, uint32_t ms)
+{
+ struct bes2700_mbox_raw raw;bes2700_mbox_get_raw(mailbox,&raw);
+ int held=service(BES_LIFECYCLE_RESET_STATUS,0);
+ bool idle=q_idle();
+ uint32_t rc=held || !idle || ((raw.local|raw.peer)&0xaU) ? 43 : 0;
+ observe_begin("held",rc);field(" scope=",scope);field(" session=",generation);
+ field(" local_idle=",idle);field(" reset_held=",!held);
+ field(" local_irq=",raw.local);field(" peer_irq=",raw.peer);field(" rc=",rc);end();
+ observe_begin("result",rc);field(" version=",BES_OBSERVATION_VERSION);
+ field(" scope=",scope);field(" pass=",!rc);field(" session=",generation);
+ field(" functional_ms=",observation.functional_ms);field(" ms=",ms);
+ field(" samples=",monitor_samples);field(" rc=",rc);end();
+ return rc;
+}
+/* Independent liveness while manager copies/CRCs peer memory. UART serialized.
+ * The manager publishes its terminal state under log_lock; only then may this
+ * thread inspect reset/mailbox. Short success leaves this monitor running. */
 static void monitor(void *a,void *b,void *c)
 {
  ARG_UNUSED(a);ARG_UNUSED(b);ARG_UNUSED(c);k_sem_take(&monitor_start,K_FOREVER);
- int64_t start=k_uptime_get();uint32_t raw=bth_ticks();uint64_t ticks=0;
- for(unsigned i=0;i<=BES_LIFECYCLE_OBSERVE_SECONDS;i++) {
+ int64_t start=monitor_origin;uint32_t raw=bth_ticks();uint64_t ticks=0;
+ for(unsigned i=0;i<=BES_OBSERVATION_LIMIT_MS/1000;i++) {
   if(i) { k_sleep(K_TIMEOUT_ABS_MS(start+i*1000)); }
   uint32_t now=bth_ticks(),ms=(uint32_t)(k_uptime_get()-start);
   ticks+=(uint32_t)(now-raw);raw=now;size_t stack=0;
@@ -84,8 +105,37 @@ static void monitor(void *a,void *b,void *c)
   bth_puts(" ticks=");bth_dec64(ticks);field(" timer=",timer_count);
   field(" stack=",stack);field(" guards=",bth_guards_ok());field(" rc=",rc);end();
   monitor_samples=i+1;if(rc) { monitor_error=rc;break; }
+  k_mutex_lock(&log_lock,K_FOREVER);
+  bool functional=observation.functional;
+  unsigned scope=bes_observation_due(&observation,ms);
+  k_mutex_unlock(&log_lock);
+  if(!functional && ms>=BES_OBSERVATION_LONG_MS) { monitor_error=31;break; }
+  if(scope) {
+   rc=observe_checkpoint(scope,ms);
+   if(rc) { monitor_error=rc;break; }
+   observation.short_done=true;
+   if(scope==2) { break; }
+   /* If functionality ended late, both ranges may finish on this sample. */
+   if(bes_observation_due(&observation,ms)==2) {
+    monitor_error=observe_checkpoint(2,ms);break;
+   }
+  }
  }
  k_sem_give(&monitor_done);
+}
+static int observe_terminal(int rc, uint32_t attempts, uint32_t recoveries)
+{
+ if(!rc && !monitor_error) {
+  observe_begin("functional",0);
+  observation.functional_ms=(uint32_t)(k_uptime_get()-monitor_origin);
+  observation.functional=true;
+  field(" version=",BES_OBSERVATION_VERSION);field(" ms=",observation.functional_ms);
+  field(" session=",generation);field(" releases=",releases);
+  field(" attempts=",attempts);field(" recoveries=",recoveries);field(" rc=",0);end();
+ }
+ if(k_sem_take(&monitor_done,K_MSEC(BES_OBSERVATION_LIMIT_MS+1000)) && !rc) { rc=31; }
+ if(monitor_error && !rc) { rc=32; }
+ return rc;
 }
 K_THREAD_DEFINE(lifecycle_monitor,2048,monitor,NULL,NULL,NULL,-1,0,0);
 static int peer_read(struct dual_status *out)
@@ -449,28 +499,15 @@ static int isolation_run(void)
   } else if(CONFIG_BES2700_M55_RECOVERY_FAIL_STEP) { rc=46; }
  }
 #endif
- /* Keep independent BTH liveness after both expected and unexpected faults. */
- if(k_sem_take(&monitor_done,K_SECONDS(BES_LIFECYCLE_OBSERVE_SECONDS+1)) && !rc) { rc=31; }
- if(monitor_error && !rc) { rc=32; }
- if(!containment_rc) {
-  struct bes2700_mbox_raw raw;bes2700_mbox_get_raw(mailbox,&raw);
-  int held=service(BES_LIFECYCLE_RESET_STATUS,0);
-  bool held_bad=held || ((raw.local|raw.peer)&0xaU);
-  if(held_bad && !rc) { rc=43; }
-  begin("held",held_bad?43:0);field(" session=",generation);field(" reset_held=",!held);
-  field(" local_irq=",raw.local);field(" peer_irq=",raw.peer);
-  field(" rc=",held_bad?43:0);end();
- }
 #ifdef CONFIG_BES2700_M55_RECOVERY
- begin(CONFIG_BES2700_M55_RECOVERY_FAIL_STEP?"recovery_failure_result":"recovery_result",rc);field(" pass=",!rc);field(" session=",generation);
- field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
- field(" attempts=",recovery.attempts);field(" recoveries=",recovery.completed);
+ rc=observe_terminal(rc,recovery.attempts,recovery.completed);
 #else
- begin("isolation_result",rc);field(" pass=",!rc);field(" session=",generation);
- field(" reason=",fault);field(" samples=",monitor_samples);field(" releases=",releases);
- field(" recoveries=",0);
+ rc=observe_terminal(rc,0,0);
 #endif
- field(" rc=",rc);end();
+ if(rc) {
+  begin("observation_failed",rc);field(" session=",generation);field(" rc=",rc);end();
+ }
+
  return rc;
 }
 #endif
@@ -508,6 +545,7 @@ int bes2700_lifecycle_validate(void)
   field(" hz=",hz);field(" guards=",guards);field(" rc=",rc);end();
  }
  if(!rc) {
+  monitor_origin=k_uptime_get();
   k_timer_start(&timer,K_MSEC(100),K_MSEC(100));k_sem_give(&monitor_start);
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
   (void)isolation_run();
@@ -516,9 +554,7 @@ int bes2700_lifecycle_validate(void)
   for(unsigned i=0;i<BES_LIFECYCLE_ROUNDS;i++) {
    rc=session_run(i);if(rc || monitor_error) { if(!rc) { rc=30; }break; }completed++;
   }
-  /* Peer held reset after all sessions; observe BTH to fixed 600s. */
-  if(!rc && k_sem_take(&monitor_done,K_SECONDS(BES_LIFECYCLE_OBSERVE_SECONDS+1))) { rc=31; }
-  if(!rc && monitor_error) { rc=32; }
+  rc=observe_terminal(rc,0,0);
 #endif
  }
  k_timer_stop(&timer);k_thread_abort(lifecycle_monitor);q_stop();
@@ -538,7 +574,10 @@ int bes2700_lifecycle_validate(void)
   end();
  }
  if(service) { (void)service(DUAL_STOP,0); }
+ if(rc) {
  begin("result",rc);field(" pass=",!rc);field(" sessions=",completed);
  field(" restarts=",completed?completed-1:0);field(" samples=",monitor_samples);
- field(" rc=",rc);end();bth_log_reset();return 0;
+ field(" rc=",rc);end();
+ }
+ bth_log_reset();return 0;
 }

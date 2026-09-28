@@ -61,26 +61,26 @@
 
 | 配置 | 消息行为与完成条件 | 心跳观察终点 |
 |---|---|---:|
-| ipc-sequential | 顺序双向各 10000 条，完成后继续观察心跳 | 600 秒 |
+| ipc-sequential | 顺序双向各 10000 条，完成后继续观察心跳 | 至少 600 秒（长范围） |
 | ipc-backpressure | 双向持续通信 600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 610 秒 |
-| ipc-fault-injection | 双端错误注入、错误检测及前后正常通信检查，完成后继续观察心跳 | 600 秒 |
+| ipc-fault-injection | 双端错误注入、错误检测及前后正常通信检查，完成后继续观察心跳 | 至少 600 秒（长范围） |
 | ipc-backpressure-1h | 双向持续通信 3600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 3610 秒 |
-| m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 600 秒 |
-| m55-ready-timeout | M55 在 READY 前停止，检测超时并隔离 | 600 秒 |
-| m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 600 秒 |
-| m55-ready-recovery | READY 超时隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
-| m55-heartbeat-recovery | 心跳停止隔离后恢复一次，新会话双向各 1000 条消息 | 600 秒 |
-| `m55-ipc-stall-recovery` | 心跳正常、IPC 进度停止后恢复 | 600 秒 |
-| `m55-quiesce-recovery` | QUIESCE 超时后恢复 | 600 秒 |
-| `m55-fatal-recovery` | 有效 fatal 发布后恢复 | 600 秒 |
-| `m55-fatal-unreadable-recovery` | fatal 发布不可读，心跳超时后恢复 | 600 秒 |
-| `m55-repark-failure` | REPARK 前拒绝操作，保持隔离且禁止重试 | 600 秒 |
-| `m55-load-failure` | 装载前拒绝操作，保持隔离且禁止重试 | 600 秒 |
-| `m55-recovery-ready-failure` | 新会话 READY 超时，保持隔离且禁止重试 | 600 秒 |
+| m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 至少 600 秒（长范围） |
+| m55-ready-timeout | M55 在 READY 前停止，检测超时并隔离 | 至少 600 秒（长范围） |
+| m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 至少 600 秒（长范围） |
+| m55-ready-recovery | READY 超时隔离后恢复一次，新会话双向各 1000 条消息 | 至少 600 秒（长范围） |
+| m55-heartbeat-recovery | 心跳停止隔离后恢复一次，新会话双向各 1000 条消息 | 至少 600 秒（长范围） |
+| `m55-ipc-stall-recovery` | 心跳正常、IPC 进度停止后恢复 | 至少 600 秒（长范围） |
+| `m55-quiesce-recovery` | QUIESCE 超时后恢复 | 至少 600 秒（长范围） |
+| `m55-fatal-recovery` | 有效 fatal 发布后恢复 | 至少 600 秒（长范围） |
+| `m55-fatal-unreadable-recovery` | fatal 发布不可读，心跳超时后恢复 | 至少 600 秒（长范围） |
+| `m55-repark-failure` | REPARK 前拒绝操作，保持隔离且禁止重试 | 至少 600 秒（长范围） |
+| `m55-load-failure` | 装载前拒绝操作，保持隔离且禁止重试 | 至少 600 秒（长范围） |
+| `m55-recovery-ready-failure` | 新会话 READY 超时，保持隔离且禁止重试 | 至少 600 秒（长范围） |
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
 
-`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；完整运行需包含 11 次会话和至少 601 条 BTH 心跳。实板结论以匹配镜像的独立验证报告为准。
+`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；验收需包含 11 次会话及所选范围的完整观察。实板结论以匹配镜像的独立验证报告为准。
 
 以下以 ipc-fault-injection 为例；选择其他配置时修改变量，各配置使用独立构建目录：
 
@@ -126,13 +126,13 @@ mkdir -p validation
 
 默认由 BTH 输出两核运行信息。只保存末尾的 `pass` 行无法完成验收，解析器还会检查启动身份、计时、心跳、消息记录及顺序。
 
-开始测试前查看待测包 `layout.json` 的 `duration_seconds`，据此预留心跳观察时间。消息阶段结束后仍可能继续输出心跳，日志应保留到最终双核运行结果，不能仅凭消息结束就停止采集。实际通过情况由下一节的解析器判定。
+开始测试前查看待测包 `layout.json` 的 `observation` 与 `duration_seconds`，按计划范围保留日志。消息完成不等于观察结束，实际通过情况由同包分析器判定；默认解析长范围。
 
 ### 解析与判读
 
 两个隔离场景使用包内 `analyze_dual_isolation.py`，要求见[故障隔离契约](m55-restart.zh-CN.md#故障隔离场景)。它们保持 M55 复位，不执行自动重载。
 
-两个恢复场景使用包内 `analyze_dual_recovery.py`，见[一次受控故障恢复](m55-restart.zh-CN.md#一次受控故障恢复)。新会话完成消息和正常停止后，BTH 继续完成观察。
+恢复场景使用包内 `analyze_dual_recovery.py`，见[一次受控故障恢复](m55-restart.zh-CN.md#一次受控故障恢复)。新会话完成消息和正常停止后，BTH 继续完成观察。
 
 四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
 
@@ -153,7 +153,48 @@ mkdir -p validation
 
 顶层 `status` 只表示日志中最后一次启动的结果。检查 `session_count` 和每个 `sessions` 条目的 `status`、`errors`、`missing`，不能用最后一次通过覆盖先前失败或不完整的启动。建议每轮独立保存日志和报告；预期单轮报告只有一个 session，且状态为 `pass`、`errors` 和 `missing` 为空。报告中的计时 warnings 仍需按其提示复核。
 
-消息正式候选应分别构建并实板验收四种消息场景。`ipc-sequential`、`ipc-fault-injection` 和 `ipc-backpressure-1h` 各保存至少一次独立启动的完整日志与报告；`ipc-backpressure` 保存三次。顺序消息场景核对双向各 10000 条及后续心跳，错误注入场景核对检测及恢复后的正常通信，一小时场景核对完整持续时间和最终闭环计数。重启候选按[重启契约](m55-restart.zh-CN.md)完成三次独立物理断电重启的完整运行。每轮使用 `run-01`、`run-02` 等文件名，并按该包的 `layout.json` 解析。解析器不能证明是否断电，冷启动结论必须同时有操作记录。固件身份变化后，应根据改动范围重新验证并生成对应报告；旧消息场景的实板证据不适用于字节已变化的新镜像。
+实板前依据下文矩阵及改动影响固定场景、验收范围和冷启动轮次。发生异常或公共路径变化时追加针对性验证。
+每轮关联自己的镜像 SHA256、完整包和报告；物理断电必须有操作记录，解析器不能证明断电。
+旧固件的实板证据不直接适用于字节已变化的新镜像。
+
+### 分层观察范围
+
+包内 `observation` 声明支持的范围。十二个生命周期场景及 `ipc-sequential`、
+`ipc-fault-injection` 在同一镜像、同一次启动中依次产生：
+
+- `functional`：完成该场景全部操作和消息计数。
+- `short`：功能完成后继续观察至少 60 秒，健康样本连续，并完成新的末端状态检查。
+- `long`：达到从 monitor 启动起至少 600 秒，同时满足完整短窗口，再次检查末端状态。
+
+生命周期末端确认本地 worker 静止、M55 复位保持和 mailbox 通道 1 标志清理，不访问复位态 DTCM。
+消息场景重新读取双向队列的真实状态、guard 和空队列条件，M55 心跳继续运行。
+十次正常重启、消息目标和全部十一项协议错误注入保持不变。样本数随实际经过时间确定，不能固定改为 61 条。
+
+使用同包的场景分析器，显式选择短范围：
+
+```sh
+.venv/bin/python "$BES_TEST_DIR/release/analyze_dual_recovery.py" \
+  "$BES_TEST_DIR/run-01.log" --manifest "$BES_TEST_DIR/release/layout.json" \
+  --scope short --output "$BES_TEST_DIR/run-01-short.json"
+```
+
+该示例适用于恢复场景；其他场景选用对应的消息、隔离或正常重启分析器。
+省略 `--scope` 时默认 `long`；`--scope functional` 用于诊断，不能代替短观察冷启动验收。
+`zephyr_observe result` 中 `scope=1` 表示短范围，`scope=2` 表示长范围，但仍须解析完整证据。
+
+报告分别记录 `requested_scope`、`scopes`、`overall_status` 和 `complete`。
+短范围 `status: pass` 时，整轮仍可能是 `overall_status: incomplete`、`complete: false`。
+固件在短结果后继续监测；长测须继续采集。同一启动后续出现错误，即使按 `--scope short`
+解析也会判失败。保留全部已采集日志，不能截去后续故障而仅提交成功前缀。
+
+两种背压仅支持长范围，保持 600/3600 秒真实通信与额外 10 秒观察收尾。
+旧包继续使用自己的分析器和完整观察规则，不能仅添加命令参数便取得短范围验收。
+
+建议里程碑矩阵为十六种场景各一轮：`m55-ipc-stall-recovery`、
+`m55-recovery-ready-failure`、`ipc-sequential` 保留长范围，两种背压保留原合同，
+其余十一项采用短范围。IPC/QUIESCE 的额外冷启动重复轮次可采用短范围，报告明确登记范围与次数。
+修改时钟、计时器、复位或 IRQ，或出现未解释异常时，应增加受影响路径的长测。
+60 秒观察不能等同于 600 秒的可靠性覆盖。
 
 ### 测试记录
 

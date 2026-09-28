@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fixed validation scenarios, shared by configuration and release analyzers."""
+import json
 from dataclasses import dataclass
 from types import MappingProxyType
 
-IDENTITY_SCHEMA = 3
-VALIDATION_SCHEMA = 1
+IDENTITY_SCHEMA = 4
+VALIDATION_SCHEMA = 2
 
 
 @dataclass(frozen=True)
@@ -53,10 +54,37 @@ def _check_fields(data, expected):
         raise ValueError('Legacy validation metadata; use the analyzer from that release')
 
 
+def observation_contract(name):
+    scenario = get_profile(name)
+    if scenario.mode == 2:
+        return dict(version=1, kind='sustained', scopes=['long'],
+                    long_ms=scenario.heartbeat * 1000)
+    return dict(version=1, kind='terminal', scopes=['functional', 'short', 'long'],
+                short_ms=60000, long_ms=600000, limit_ms=660000,
+                functional_limit_ms=600000 if scenario.m55_restart else 590000,
+                sample_period_ms=1000)
+
+
+def layered(manifest):
+    return manifest.get('validation_schema') == 2 and manifest.get('message_mode') != 2
+
+
+def _schema(data):
+    schema = data.get('validation_schema')
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError('Unsupported validation schema; use the release analyzer')
+    if schema == 2 and json.dumps(data.get('observation'), sort_keys=True) != json.dumps(observation_contract(data['validation_profile']), sort_keys=True):
+        raise ValueError('Observation contract mismatch')
+    if schema == 1 and 'observation' in data:
+        raise ValueError('Legacy validation cannot declare observation scopes')
+    return schema
+
+
 def validate_identity(identity):
     scenario = get_profile(identity.get('validation_profile'))
-    _check_fields(identity, dict(schema=IDENTITY_SCHEMA,
-                                validation_schema=VALIDATION_SCHEMA,
+    schema = _schema(identity)
+    _check_fields(identity, dict(schema=4 if schema == 2 else 3,
+                                validation_schema=schema,
                                 mode=scenario.mode, duration=scenario.seconds,
                                 heartbeat=scenario.heartbeat))
     return scenario
@@ -64,7 +92,8 @@ def validate_identity(identity):
 
 def validate_manifest(manifest, *, restart=False, isolation=False, recovery=False):
     scenario = get_profile(manifest.get('validation_profile'))
-    _check_fields(manifest, dict(validation_schema=VALIDATION_SCHEMA,
+    schema = _schema(manifest)
+    _check_fields(manifest, dict(validation_schema=schema,
                                 message_mode=scenario.mode,
                                 message_seconds=scenario.seconds,
                                 duration_seconds=scenario.heartbeat))

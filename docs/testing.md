@@ -57,26 +57,26 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 
 | Profile | Message behavior and completion | Heartbeat observation ends |
 |---|---|---:|
-| `ipc-sequential` | 10,000 messages in each direction, then heartbeat observation | 600 s |
+| `ipc-sequential` | 10,000 messages in each direction, then heartbeat observation | At least 600 s (long) |
 | `ipc-backpressure` | Continuous bidirectional traffic for 600 s, including slow consumers and counter closure | 610 s |
-| `ipc-fault-injection` | Fault injection on both cores, detection, and normal traffic before/after | 600 s |
+| `ipc-fault-injection` | Fault injection on both cores, detection, and normal traffic before/after | At least 600 s (long) |
 | `ipc-backpressure-1h` | Continuous bidirectional traffic for 3,600 s and final counter closure | 3,610 s |
-| `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | 600 s |
-| `m55-ready-timeout` | Halt M55 before READY; detect timeout and isolate it | 600 s |
-| `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | 600 s |
-| `m55-ready-recovery` | READY timeout, isolation and one new session with 1,000 messages each way | 600 s |
-| `m55-heartbeat-recovery` | Heartbeat stop, isolation and one new session with 1,000 messages each way | 600 s |
-| `m55-ipc-stall-recovery` | Recover stalled IPC with a live heartbeat | 600 s |
-| `m55-quiesce-recovery` | Recover after a QUIESCE timeout | 600 s |
-| `m55-fatal-recovery` | Recover a readable fatal publication | 600 s |
-| `m55-fatal-unreadable-recovery` | Recover heartbeat timeout after a lost fatal publication | 600 s |
-| `m55-repark-failure` | Reject REPARK, remain isolated, deny retry | 600 s |
-| `m55-load-failure` | Reject loading, remain isolated, deny retry | 600 s |
-| `m55-recovery-ready-failure` | Replacement READY timeout, containment and denied retry | 600 s |
+| `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | At least 600 s (long) |
+| `m55-ready-timeout` | Halt M55 before READY; detect timeout and isolate it | At least 600 s (long) |
+| `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | At least 600 s (long) |
+| `m55-ready-recovery` | READY timeout, isolation and one new session with 1,000 messages each way | At least 600 s (long) |
+| `m55-heartbeat-recovery` | Heartbeat stop, isolation and one new session with 1,000 messages each way | At least 600 s (long) |
+| `m55-ipc-stall-recovery` | Recover stalled IPC with a live heartbeat | At least 600 s (long) |
+| `m55-quiesce-recovery` | Recover after a QUIESCE timeout | At least 600 s (long) |
+| `m55-fatal-recovery` | Recover a readable fatal publication | At least 600 s (long) |
+| `m55-fatal-unreadable-recovery` | Recover heartbeat timeout after a lost fatal publication | At least 600 s (long) |
+| `m55-repark-failure` | Reject REPARK, remain isolated, deny retry | At least 600 s (long) |
+| `m55-load-failure` | Reject loading, remain isolated, deny retry | At least 600 s (long) |
+| `m55-recovery-ready-failure` | Replacement READY timeout, containment and denied retry | At least 600 s (long) |
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
 
-For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and at least 601 BTH heartbeat samples. Hardware evidence belongs to the matching image and its separate validation report.
+For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and the selected observation scope. Hardware evidence belongs to the matching image and its separate validation report.
 
 For example, build fault injection in its own directory:
 
@@ -120,13 +120,13 @@ Continue only if every entry is `OK` and the command exits 0. The candidate dire
 3. Start capture before boot. Record board model/revision, SHA256 of the flashed file, operation time, and boot method. Distinguish power cycles from resets.
 4. Save the first full run as `$BES_TEST_DIR/run-01.log`, from boot through final message and dual-core results. Preserve complete failure logs.
 
-BTH normally reports both cores. A trailing `pass` line alone is insufficient; the analyzer checks identity, timing, heartbeats, messages, and order. Read `duration_seconds` in the candidate's `layout.json` and capture through final dual-core results, including heartbeats after the message phase.
+BTH normally reports both cores. A trailing `pass` line alone is insufficient; the analyzer checks identity, timing, heartbeats, messages, and order. Read `observation` and `duration_seconds` in the candidate's `layout.json`. Capture through the result for the planned scope; message completion alone is insufficient. The default analyzer scope is long.
 
 ### Analyze results
 
 The two isolation profiles use packaged `analyze_dual_isolation.py`; see the [fault isolation contract](m55-restart.md#fault-isolation-profiles). They keep M55 held in reset and do not reload it.
 
-The two recovery profiles use packaged `analyze_dual_recovery.py`; see [one-attempt recovery](m55-restart.md#one-attempt-fault-recovery). The recovered session completes messages and normal shutdown before BTH finishes its observation.
+Recovery profiles use packaged `analyze_dual_recovery.py`; see [one-attempt recovery](m55-restart.md#one-attempt-fault-recovery). The recovered session completes messages and normal shutdown before BTH finishes its observation.
 
 For the four message profiles, the packaged `analyze_dual_message.py` checks boot, timing, heartbeats, and messages together. For `m55-restart`, use packaged `analyze_dual_restart.py` with the same `--manifest` and `--output` arguments. Keep the full package because analyzers import companion files; use the versions matching the flashed image:
 
@@ -147,7 +147,63 @@ Here `--manifest` takes **`layout.json`**, not `manifest.json`. It checks BTH/M5
 
 Top-level `status` describes only the last boot session. Inspect `session_count` and every session's `status`, `errors`, and `missing`; a later pass cannot erase an earlier failure. Save each run separately. A one-run report should have one passing session with empty `errors` and `missing`; review any timing warnings.
 
-For a formal message candidate, build and test all four message profiles on hardware. Save at least one complete independent run for `ipc-sequential`, `ipc-fault-injection`, and `ipc-backpressure-1h`, and three for `ipc-backpressure`. Sequential testing checks 10,000 messages each way and later heartbeats; fault injection checks detection and recovery; the one-hour profile checks full duration and final counters. The restart candidate needs three complete runs with independent physical power cycles, following the [restart contract](m55-restart.md). Use `run-01`, `run-02`, and so on, analyzing each against its own `layout.json`. A parser cannot prove a power cycle: cold-boot claims also need an operation record. New firmware identity requires appropriate retesting. Earlier message-profile evidence belongs to its own image and does not validate changed bytes.
+Freeze the required profiles, scopes and cold-boot counts before hardware
+validation, using the observation matrix below and the change's impact.
+Run counts may increase for failures or changed shared paths. Each run belongs
+to its image SHA256 and package. Record physical power removal separately;
+a parser cannot prove it, and earlier firmware reports do not validate changed bytes.
+
+### Observation scopes
+
+The package's `observation` contract defines the supported scopes. The twelve
+lifecycle profiles, `ipc-sequential`, and `ipc-fault-injection` produce three
+results from the same image and boot:
+
+- `functional`: all scenario operations and message counts have completed.
+- `short`: another 60 seconds have elapsed after functional completion, with
+  continuous healthy samples and a fresh terminal-state check.
+- `long`: monitoring has reached both 600 seconds from monitor start and the
+  complete short window, followed by another terminal-state check.
+
+Lifecycle checkpoints confirm local-worker idle, M55 reset held and clear
+mailbox channel-1 flags without accessing held-reset DTCM. Message checkpoints
+reread both live queue publications, guards and empty-ring state; M55 heartbeats
+continue. Ten normal restarts, message targets and all eleven protocol error
+cases remain required. Sample counts follow elapsed time, not a fixed 61 rows.
+
+Use the same packaged scenario analyzer, explicitly selecting a short scope:
+
+```sh
+.venv/bin/python "$BES_TEST_DIR/release/analyze_dual_recovery.py" \
+  "$BES_TEST_DIR/run-01.log" --manifest "$BES_TEST_DIR/release/layout.json" \
+  --scope short --output "$BES_TEST_DIR/run-01-short.json"
+```
+
+Use this example for a recovery profile; choose the corresponding message,
+isolation or restart analyzer for other profiles. Omitting `--scope` selects
+`long`. `--scope functional` is useful for diagnostics but does not complete a
+short cold-boot check. `zephyr_observe result` has `scope=1` for short and
+`scope=2` for long. A result line alone never proves acceptance.
+
+Reports distinguish `requested_scope`, `scopes`, `overall_status` and `complete`.
+A short `status: pass` may coexist with `overall_status: incomplete` and
+`complete: false`. Continue capture when testing long; the firmware does not
+stop at short success. Later errors in the same boot invalidate the run even
+when parsing with `--scope short`. Preserve the complete available capture;
+do not cut a later failure off a passing prefix.
+
+Both backpressure profiles support only long scope and retain their 600/3600
+seconds of active traffic plus ten seconds for observation and completion.
+Older packages retain their own analyzers and full-duration rules; adding a
+CLI option cannot grant an old image short acceptance.
+
+A representative milestone matrix runs all sixteen scenarios once. Keep long
+scope for `m55-ipc-stall-recovery`, `m55-recovery-ready-failure` and
+`ipc-sequential`, along with both full backpressure profiles; use short scope
+for the other eleven. Extra IPC/QUIESCE cold boots may use short scope. Record
+scope and repetitions explicitly. Clock, timer, reset or IRQ changes and any
+unexplained failures require additional long checks for affected paths;
+60-second observation is not equivalent to 600-second reliability coverage.
 
 ### Evidence records
 
