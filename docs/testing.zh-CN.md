@@ -11,6 +11,7 @@
 | 仓库检查 | 文件范围、`west.yml` 与 `module-lock.json` 的一致性、文档链接目标文件及 HAL 文件哈希 | `check_repo.py` 输出 |
 | 主机回归 | 在主机执行协议、驱动模型、日志解析和打包回归 | `test_host.py` 输出及退出码 |
 | 构建与离线审计 | 固件生成、装载布局、镜像匹配及包内校验 | 构建日志、`release/offline-validation.json`、`release/SHA256SUMS` |
+| 资源所有权 | 生成 DTS/config 的访问边界及冲突 | 包外保存的 `check_resources.py` 报告 |
 | 实板验收 | 目标板的启动、双核运行和消息行为 | 原始串口日志、包内解析器报告及操作记录 |
 | 发布准备（维护者） | 固定来源、证据归档及如实标注分发状态 | [贡献指南：分支与发布](../CONTRIBUTING.zh-CN.md#分支与发布) |
 
@@ -28,6 +29,37 @@
 ## 构建验证
 
 普通开发按[构建说明](getting-started.zh-CN.md#构建)使用 `main` 默认配置，构建目录为 `build/bes2700yp/main`。构建成功后检查离线审计和[包内校验](getting-started.zh-CN.md#构建产物与校验)；它们不能代替实板验收。离线审计项目见[架构说明](architecture.zh-CN.md#离线审计范围)。
+
+### 资源所有权静态检查
+
+[check_resources.py](../scripts/check_resources.py)读取完整发布包中两核生成的
+`bth.dts`、`m55.dts`、`bth.config` 和 `m55.config`：
+
+```sh
+.venv/bin/python bestechnic-zephyr/scripts/check_resources.py \
+  --release build/bes2700yp/main/release --zephyr-base zephyr \
+  --output build/bes2700yp/main-resources.json
+```
+
+使用工作区锁定的 Zephyr 提供 DTS 解析器。检查器结合现有运行期资源契约、bootstrap
+契约和[审计策略](../scripts/resource_ownership.json)，核对当前双核应用的 CPU
+时钟及配置、已启用 MMIO 的使用权、同核 IRQ 范围与冲突、mailbox 字段共享、BTH
+代码/数据别名和共享内存保留区。不同核的私有外设地址或 IRQ 数字相同允许通过。
+bootstrap UART 及其引脚在 DTS 节点禁用时仍被保留。通用 GPIO/pinctrl 编码、地址
+转换及新增 clock/reset/power 依赖需要审查策略，未获准时检查失败。
+
+预期 `status: pass`、`errors: []`，退出码为 0；冲突或输入不可读返回 1，命令行参数
+错误返回 2。`unconfirmed` 单独列出尚缺少的板级连接、电平、IRQ 路由及时间基准证据，
+静态检查通过不表示这些问题已解决。该检查补充 ELF/物理 RAM bank 审计，不执行运行期
+权限控制，也不证明硬件运行正常。
+
+报告记录检查器、策略、契约、解析器及 DTS/config 的哈希，须保存在源码仓和冻结包之外。
+契约兼容的既有包可直接检查，保留原始校验清单和实板证据。审计脚本与策略纳入源码归档，
+不作为固件配置；工具改动是否需要重新构建或刷板，应依据实际构建输入差异决定。
+新的正式候选仍须生成自己的构建及来源记录。
+
+CI 在包内校验之后执行此检查，资源冲突会阻止产物验收。直接执行 `west build`
+会运行既有镜像/ELF 审计，资源所有权检查需另外执行上述命令。
 
 ### CI 入口
 
@@ -47,9 +79,9 @@
   --cross-compile "${CROSS_COMPILE:?Set up the toolchain first}"
 ```
 
-`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表全部七种场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建四种消息场景，但不进行实板验收；重启场景可单独选择 `--profiles m55-restart`。
+`--output` 必须是源码仓库之外、尚不存在的目录，重复执行时使用新目录。脚本接受下表全部场景；未指定 `--profiles` 时只执行仓库和主机检查，不构建固件。上例构建四种消息场景，但不进行实板验收；重启场景可单独选择 `--profiles m55-restart`。
 
-输出目录包含 `summary.json`、`repository.log`、`host.log`，以及所选配置的构建日志和构建目录。预期汇总 `status` 为 `pass`、各项 `exit_code` 为 0；所构建包的 `SHA256SUMS` 也会被核对。脚本不操作硬件，汇总中的 `hardware` 保持 `not_tested`。正式候选可追加 `--formal`，要求见[候选包来源](../CONTRIBUTING.zh-CN.md#候选包来源)。
+输出目录包含 `summary.json`、`repository.log`、`host.log`，以及所选配置的构建日志、构建目录和 `<profile>-resources.json` 资源报告。预期汇总 `status` 为 `pass`、各项 `exit_code` 为 0；所构建包的 `SHA256SUMS` 也会被核对。脚本不操作硬件，汇总中的 `hardware` 保持 `not_tested`。正式候选可追加 `--formal`，要求见[候选包来源](../CONTRIBUTING.zh-CN.md#候选包来源)。
 
 ## 专项验证配置
 

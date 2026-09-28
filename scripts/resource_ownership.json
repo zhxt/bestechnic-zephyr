@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "chip": "bes2700yp",
+  "scope": "Current dual-core applications; static audit policy, not hardware configuration",
+  "cores": {
+    "bth": {"cpu": "arm,cortex-m33", "soc_config": "CONFIG_SOC_BES2700YP_BTH", "num_irqs": 64},
+    "m55": {"cpu": "arm,cortex-m55", "soc_config": "CONFIG_SOC_BES2700YP_CM55", "num_irqs": 72}
+  },
+  "irq_priority_bits": 3,
+  "bootstrap_uart_pads": ["P2_2", "P2_3"],
+  "bootstrap_memory": {
+    "adapter": [542113792, 65536],
+    "handoff": [542490624, 16352],
+    "mailbox": [542506976, 32]
+  },
+  "mailbox": {
+    "reg": [[1342177440, 8], [1073742132, 8]],
+    "irqs": {"bth": [39, 37], "m55": [41, 39]},
+    "priority": 3,
+    "logical_channel": 0,
+    "hardware_channel": 1
+  },
+  "unconfirmed": [
+    "Actual board/module identity, PCB revision and connector-to-pad mapping",
+    "GPIO voltage, external loads and AON GPIO interrupt routing",
+    "External calibration of SysTick, BTH fast timer and the AON timer"
+  ]
+}

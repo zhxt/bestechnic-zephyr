@@ -52,6 +52,9 @@ def main():
                 digest, name = line.split(maxsplit=1)
                 if hashlib.sha256((release / name).read_bytes()).hexdigest() != digest:
                     raise ValueError(f'Release checksum mismatch: {profile_name}/{name}')
+            run(profile_name + '-resources', [sys.executable, str(source / 'scripts/check_resources.py'),
+                '--release', str(release), '--zephyr-base', str(workspace / 'zephyr'),
+                '--output', str(output / (profile_name + '-resources.json'))])
             image = release / 'zephyr.bin'
             report['artifacts'][profile_name] = {'bytes': image.stat().st_size,
                                             'sha256': hashlib.sha256(image.read_bytes()).hexdigest()}

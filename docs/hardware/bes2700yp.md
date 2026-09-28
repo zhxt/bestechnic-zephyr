@@ -126,6 +126,8 @@ The current dual-core applications use the following ownership policy. It is a
 software access contract, not MPU enforcement or proof of electrical wiring.
 Bootstrap initializes shared hardware; BTH manages its subsequent use. M55 owns
 its private core peripherals and the fields assigned to its IPC endpoint.
+The [static resource check](../testing.md#static-resource-ownership) audits the
+generated DTS/config against these boundaries before new resource users are added.
 
 | Resource | Initialization / runtime owner | Access boundary |
 |---|---|---|

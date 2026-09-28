@@ -9,6 +9,7 @@ Prepare the workspace, pinned HAL module, and toolchain with [setup and build](g
 | Repository | File scope, west/lock agreement, local document targets, HAL hashes | `check_repo.py` output |
 | Host regression | Protocol, driver models, log parsing, and packaging | `test_host.py` output and exit code |
 | Build and offline audit | Firmware, load layout, core matching, package checksums | Build logs, `release/offline-validation.json`, `release/SHA256SUMS` |
+| Resource ownership | Generated DTS/config access boundaries and conflicts | `check_resources.py` report outside the package |
 | Hardware validation | Boot, dual-core operation, and messages on the target board | Raw serial logs, packaged analyzer reports, operation record |
 | Publication preparation | Frozen provenance, evidence, and accurate distribution-status disclosure | [Maintainer release guidance](../CONTRIBUTING.md#branches-and-releases) |
 
@@ -26,6 +27,45 @@ Host regressions cover actual message code, protocol validation, snapshot preemp
 ## Build validation
 
 Use the default `main` build in [build instructions](getting-started.md#build) at `build/bes2700yp/main`. Afterward, check the [package checksums](getting-started.md#build-outputs-and-verification) and [offline audit](architecture.md#offline-audit). Neither establishes hardware operation.
+
+### Static resource ownership
+
+[check_resources.py](../scripts/check_resources.py) reads both cores' generated
+`bth.dts`, `m55.dts`, `bth.config` and `m55.config` from a complete release package:
+
+```sh
+.venv/bin/python bestechnic-zephyr/scripts/check_resources.py \
+  --release build/bes2700yp/main/release --zephyr-base zephyr \
+  --output build/bes2700yp/main-resources.json
+```
+
+Use the workspace's pinned Zephyr revision for its DTS parser. The checker combines
+the existing runtime resource and bootstrap contracts with the
+[audit policy](../scripts/resource_ownership.json). It checks the current dual-core
+applications' CPU clock/configuration, enabled MMIO claims, local IRQ ranges and
+conflicts, mailbox field sharing, BTH code/data aliases, and shared-memory
+reservations. Identical private-core addresses and IRQ numbers on different cores
+are allowed. Bootstrap UART and its pads remain reserved when its DTS node is
+disabled. General GPIO/pinctrl encodings, address translations, and new
+clock/reset/power dependencies require policy review and are rejected, rather than
+treated as granted resources.
+
+Expect `status: pass`, `errors: []` and exit code 0. A conflict or unreadable input
+returns exit code 1; command-line errors return 2. `unconfirmed` separately lists
+missing board wiring, voltage, IRQ-route and timebase evidence; passing static
+checks does not resolve these items. This check supplements the ELF/physical-bank
+audit and does not enforce runtime access or establish hardware operation.
+
+Reports record checker, policy, contract, parser and DTS/config hashes. Save them
+outside the source and frozen package. Compatible existing packages may be checked
+without rebuilding; preserve their original checksums and hardware evidence. Audit
+scripts and policy are archived source, not firmware configuration. Compare actual
+build inputs before deciding whether a tooling-only change needs another firmware
+build or board test. A new formal candidate still needs its own build/provenance.
+
+CI runs this check after package checksum verification and rejects conflicts before
+accepting the artifact. A direct `west build` runs the existing image/ELF audit;
+run the command above separately for resource ownership.
 
 ### CI entry point
 
@@ -45,7 +85,7 @@ To also build the four message profiles:
   --cross-compile "${CROSS_COMPILE:?Set up the toolchain first}"
 ```
 
-`--output` must be a new directory outside the source repository; choose another directory on reruns. Without `--profiles`, the script checks repository and host tests but does not build firmware. The output contains `summary.json`, `repository.log`, `host.log`, and selected build logs/directories. Expect summary `status: pass`, zero exit codes, and checked package `SHA256SUMS`. The script does not touch hardware; `hardware` remains `not_tested`. Formal candidates may add `--formal`; see [candidate provenance](../CONTRIBUTING.md#candidate-package-provenance).
+`--output` must be a new directory outside the source repository; choose another directory on reruns. Without `--profiles`, the script checks repository and host tests but does not build firmware. The output contains `summary.json`, `repository.log`, `host.log`, selected build logs/directories, and `<profile>-resources.json` resource reports. Expect summary `status: pass`, zero exit codes, and checked package `SHA256SUMS`. The script does not touch hardware; `hardware` remains `not_tested`. Formal candidates may add `--formal`; see [candidate provenance](../CONTRIBUTING.md#candidate-package-provenance).
 
 ## Validation profiles
 
