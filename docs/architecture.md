@@ -41,6 +41,41 @@ See [bootstrap/adapter.c](../platforms/bes2700yp/boot/bootstrap/adapter.c), the 
 
 Only bootstrap links the HAL libraries. BTH and M55 Zephyr images do not link them directly. After handoff, BTH calls retained services for M55 clock, memory, and startup control; the service code still executes on BTH. See [dual_service.c](../platforms/bes2700yp/boot/bootstrap/dual_service.c). `adapter` names bootstrap source and output, not another kernel.
 
+### Resource-service extension design
+
+Future resource adapters keep the same library boundary: Zephyr driver → BTH
+resource client → retained bootstrap resource service → restricted HAL facade.
+UART/GPIO data and ISR work stay in the Zephyr driver; only shared hardware setup
+crosses this bridge. The [interface design](hal.md#runtime-resource-interface-design)
+defines capabilities, calling contexts, ownership and failure handling. These
+extensions are not implemented by the current lifecycle service.
+
+Preserve the existing 32-byte `dual_service` descriptor and lifecycle operation
+semantics. Add an explicit discovery operation for a separately versioned resource
+descriptor and dispatch function; do not overload STOP, PREPARE or a snapshot
+buffer. Discovery is independent of the peer's lifecycle phase. Missing or
+incompatible capabilities fail before a resource-enabled driver changes hardware;
+they must not silently trigger full-domain initialization.
+
+Use fixed-width integer fields and validated request lengths, reserved fields,
+alignment and complete address ranges. Buffers belong to BTH and remain valid for
+the synchronous call; reject arithmetic overflow and any range outside its allowed
+memory. Do not pass Zephyr structs, floating-point values, callbacks, heap ownership
+or vendor IDs across the ABI. Validate descriptor storage and Thumb entry addresses
+against retained, file-backed ELF sections. Review calling convention, stack use
+and generated instructions across the kernel/bootstrap boundary before enabling it.
+Allocate any descriptor or scratch storage explicitly in linker/resource contracts
+and audits; apparent gaps in diagnostic memory are not free allocations.
+
+Proposed code locations are `platforms/bes2700yp/resources/` for the BTH client and
+arbitration, `platforms/bes2700yp/boot/bootstrap/` for the resident backend, and
+`include/bestechnic/bes2700yp/` for the shared project contract. Zephyr-facing drivers
+and bindings belong in `bsp/`; vendor implementation remains in the HAL producer.
+Do not add direct vendor headers or a second HAL copy to either kernel. M55 can
+gain a future IPC resource service only through a separate protocol and permission
+review. Runtime contracts and sources enter firmware build inputs; standalone
+audit policy cannot substitute for runtime authorization.
+
 ## Directory responsibilities
 
 | Directory | Responsibility |

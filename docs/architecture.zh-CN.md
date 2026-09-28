@@ -43,6 +43,31 @@ BTH 装载与交接见 [bootstrap/adapter.c](../platforms/bes2700yp/boot/bootstr
 
 HAL 静态库只链接 bootstrap，BTH 和 M55 的 Zephyr 镜像不直接链接这些库。交接后，BTH 通过保留的服务入口调用 M55 时钟、内存和启动控制等操作；服务代码仍在 BTH 核上执行，接口见 [dual_service.c](../platforms/bes2700yp/boot/bootstrap/dual_service.c)。`adapter` 是 bootstrap 源码及产物使用的名称，不代表另一个独立内核。
 
+### 资源服务扩展设计
+
+后续资源适配沿用库边界：Zephyr 驱动 → BTH 资源客户端 → bootstrap 常驻资源服务 →
+受限 HAL 小接口。UART/GPIO 数据收发和 ISR 留在 Zephyr 驱动中，只有共享硬件配置
+经此桥接。[接口设计](hal.zh-CN.md#运行期资源接口设计)定义能力、调用上下文、所有权
+和失败语义；当前生命周期服务尚未实现这些扩展。
+
+保留现有 32 字节 `dual_service` 描述符与生命周期操作语义，通过显式发现操作获取
+独立版本的资源描述符和 dispatch，不复用 STOP、PREPARE 或快照缓冲区。服务发现不依赖
+对端生命周期阶段。资源驱动启用后，能力缺失或不兼容须在改硬件前失败，不能悄悄回退到
+全域初始化。
+
+ABI 使用固定宽度整数，检查请求长度、保留字段、对齐和完整地址范围。缓冲区属于 BTH，
+在同步调用期间有效；拒绝地址计算溢出或越出允许内存的请求。不跨 ABI 传递 Zephyr
+结构体、浮点值、回调、堆所有权或厂商 ID。描述符存储位置和 Thumb 入口须落在常驻且有
+文件内容支撑的 ELF 段中，启用前评审 kernel/bootstrap 调用约定、栈占用及实际指令。
+描述符或临时存储显式纳入链接/资源契约和审计，不将诊断区看似空白的位置直接当作空闲。
+
+拟由 `platforms/bes2700yp/resources/` 承载 BTH 客户端与仲裁，
+`platforms/bes2700yp/boot/bootstrap/` 承载常驻后端，
+`include/bestechnic/bes2700yp/` 定义项目公共契约。Zephyr 驱动及 binding 放在 `bsp/`，
+厂商实现保留在 HAL 生成仓，不向两个内核加入厂商私有头文件或另一份 HAL。
+M55 后续若需要资源服务，单独评审 IPC 协议与权限。运行期契约和源码纳入固件构建输入，
+独立审计策略不能替代运行期授权。
+
 ## 目录职责
 
 | 目录 | 责任 |
