@@ -191,3 +191,7 @@ UART handoff must drain TX, transfer IRQ/state ownership and establish one runti
 writer while preserving early and fatal diagnostics. General GPIO/pinctrl,
 power-domain control and system PM still require separate implementations and
 hardware validation.
+
+## Restricted GPIO profiles
+
+The optional [GPIO qualification](../gpio.md) service polls P2_0/P2_1 and can drive P1_4. P1_5 and UART pads remain unchanged. It is disabled in ordinary profiles; there is no Zephyr GPIO/pinctrl controller or GPIO IRQ support. Actual-board wiring and electrical levels require confirmation.

@@ -302,3 +302,7 @@ in `layout.json`. Each required system-snapshot phase also requires a UART
 snapshot with the expected input clock, active bus/functional gates, released
 resets and AON pin route. The parser rejects missing records and changed fields;
 a system-only descriptor does not provide UART readback support.
+
+## Interactive GPIO profiles
+
+`gpio-input` and `gpio-led` combine sequential IPC with manual button cycles and optional LED output. See [wiring, electrical checks, operation and acceptance](gpio.md). Use `analyze_dual_message.py --scope short` with the matching release/layout.json.

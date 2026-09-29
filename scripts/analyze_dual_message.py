@@ -9,6 +9,7 @@ import analyze_dual_boot as heartbeat
 import analyze_boot_profile as profile
 from validation_profiles import validate_manifest
 import analyze_observation as observation
+import analyze_gpio
 
 FIELDS=set('magic version layout pair build session phase stage sent acked handled rejected full depth max_wait rx requests kicks done queued spurious stack elapsed stop_ms len0 len1 len2 len3 pauses error guard'.split())
 ROW=re.compile(r'(\d+)/([IE])/BTH/IPC/MAIN \| zephyr_msg (begin|progress|case|endpoint|result) (.+) !')
@@ -122,7 +123,8 @@ def analyze(text,manifest,scope='long'):
         validate_manifest(manifest)
     except ValueError as error:
         return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
-    return observation.run(profile, text, manifest, Message.analyze, scope)
+    return observation.run(profile, text, manifest,
+                           lambda t, m: analyze_gpio.run(t, m, Message.analyze), scope)
 
 
 def main():

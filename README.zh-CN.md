@@ -37,6 +37,7 @@ BTH 当前的 Zephyr 移植使用 Cortex-M33 目标配置构建，其硬件处�
 | 蓝牙 | 双模 Bluetooth 5.3、LE Audio | 尚未接入 |
 | 音频 | ADC/DAC、音频接口、ANC/EQ 等 | 尚未接入 |
 | Sensor Hub / NPU | STAR-MC1、传感器引擎、BECO NPU | 尚未接入 |
+| GPIO 验证 | GPIO 引脚 | 可选按键/LED 场景，通过受限 BTH 服务访问；尚无 Zephyr GPIO 控制器 |
 | 通用外设 | GPIO、I²C、SPI、PWM、GPADC、DMA、看门狗等 | 尚未提供对应的 BES2700YP Zephyr 适配 |
 | 时钟与低功耗 | 时钟及电源管理资源 | 使用 HAL 完成启动配置，两核当前配置为 24 MHz；尚未集成 Zephyr 系统低功耗管理 |
 
@@ -78,6 +79,7 @@ export ZEPHYR_BASE="$PWD/zephyr"
 - [Bestechnic HAL 模块](docs/hal.zh-CN.md)
 - [贡献指南](CONTRIBUTING.zh-CN.md)
 - [来源与许可范围](THIRD_PARTY_NOTICES.zh-CN.md)
+- [受限 GPIO 验证](docs/gpio.zh-CN.md)
 
 ## 许可
 

@@ -3,3 +3,12 @@
 
 rsource "bsp/drivers/mbox/Kconfig"
 rsource "bsp/drivers/serial/Kconfig"
+
+config BES2700YP_GPIO_VALIDATION
+	int "Restricted GPIO qualification mode"
+	range 0 2
+	default 0
+	help
+	  Selected by the fixed validation profile: 1 enables P2_0/P2_1
+	  polling, 2 additionally drives P1_4. Output requires compatible
+	  board IO/LED voltage. No GPIO IRQ or general controller API.

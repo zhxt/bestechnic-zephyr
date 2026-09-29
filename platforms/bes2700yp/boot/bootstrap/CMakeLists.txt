@@ -58,3 +58,10 @@ target_link_options(adapter PRIVATE ${abi} -static -nostdlib -T${linker}
 set_property(TARGET adapter APPEND PROPERTY LINK_DEPENDS ${linker})
 target_link_libraries(adapter PRIVATE -Wl,--whole-archive
   bes2700yp_bootstrap_compat bes2700yp_system bes2700yp_flash -Wl,--no-whole-archive)
+
+if(BES_GPIO_MODE GREATER 0)
+  target_sources(adapter PRIVATE gpio_service.c)
+  target_compile_definitions(adapter PRIVATE BES_GPIO_MODE=${BES_GPIO_MODE})
+  set_source_files_properties(gpio_service.c
+    PROPERTIES COMPILE_OPTIONS "-fstack-usage;-mgeneral-regs-only")
+endif()

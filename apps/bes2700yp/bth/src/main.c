@@ -9,6 +9,9 @@
 #include <bes2700_dual_doorbell.h>
 #include <bes2700_observation.h>
 #include <bes2700yp_resources.h>
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+#include <bes2700yp_gpio_validation.h>
+#endif
 #define SECONDS CONFIG_DUAL_DURATION_SECONDS
 BUILD_ASSERT(SECONDS==(CONFIG_DUAL_MSG_MODE!=2?600:CONFIG_DUAL_IPC_SECONDS+10));
 _Static_assert(BTH_LOG_ADDR >= DUAL_HW_ADDR + sizeof(struct dual_hw), "log/hardware overlap");
@@ -23,6 +26,9 @@ static void stage(uint32_t id, uint32_t rc)
 { bth_log_begin(rc?'E':'I',"LOADER","MAIN"); bth_puts("zephyr_dual stage"); field(" id=",id); field(" rc=",rc); bth_end(); }
 static void finish(uint32_t samples, uint32_t rc)
 {
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+ bes_gpio_validation_end();
+#endif
  q_stop();
  k_timer_stop(&timer);
  if(CONFIG_DUAL_MSG_MODE==2 || rc) {
@@ -191,6 +197,9 @@ int main(void)
  bth_puts("zephyr_msg begin version=2 channel=1");field(" duration=",CONFIG_DUAL_IPC_SECONDS);
  field(" progress_period=",10);field(" mode=",CONFIG_DUAL_MSG_MODE);field(" layout=",Q_LAYOUT);
  field(" pair=",CONFIG_DUAL_CC_PAIR);field(" depth=",BI_DEPTH);field(" payload=",BI_PAYLOAD);bth_end();
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+ if(bes_gpio_validation_init()){finish(0,97);return 0;}
+#endif
  q_start();bool db_printed=false;struct bes_observation observation={0};
  uint32_t start_ms=k_uptime_get_32(), start_raw=bth_ticks(), prev_cycles=peer.cycles;
  uint32_t base_peer_ms=peer.ms, base_beat=peer.beat, last_beat=peer.beat;
@@ -198,7 +207,17 @@ int main(void)
  k_timer_start(&timer,K_MSEC(100),K_MSEC(100));
  const uint32_t limit=CONFIG_DUAL_MSG_MODE==2?SECONDS:BES_OBSERVATION_LIMIT_MS/1000;
  for (uint32_t i=0;i<=limit;i++) {
-  if (i) { k_sleep(K_TIMEOUT_ABS_MS((uint64_t)start_ms+i*1000)); }
+  if (i) {
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+   while(k_uptime_get()<(uint64_t)start_ms+i*1000){
+    int grc=bes_gpio_validation_poll();
+    if(grc){finish(i,grc);return 0;}
+    k_sleep(K_MSEC(10));
+   }
+#else
+   k_sleep(K_TIMEOUT_ABS_MS((uint64_t)start_ms+i*1000));
+#endif
+  }
   if (CONFIG_DUAL_MSG_MODE==2 && i==SECONDS) { k_timer_stop(&timer); }
   uint32_t elapsed=k_uptime_get_32()-start_ms, raw=bth_ticks();
   ticks+=(uint32_t)(raw-start_raw); start_raw=raw;
@@ -256,11 +275,18 @@ int main(void)
    bth_log_begin(db.rc?'E':'I',"IPC","MAIN");bth_puts("zephyr_msg result");
    field(" finished=",db.finished);field(" rc=",db.rc);field(" session=",db.session);
    bth_end();db_printed=true;
-   if(CONFIG_DUAL_MSG_MODE!=2 && !db.rc && !rc) {
+  }
+  if(db_printed && CONFIG_DUAL_MSG_MODE!=2 && !db.rc && !rc && !observation.functional
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+     && bes_gpio_validation_done()
+#endif
+  ) {
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+    bes_gpio_validation_functional();
+#endif
     observation.functional_ms=k_uptime_get_32()-start_ms;observation.functional=true;
     observe_begin("functional",0);field(" version=",BES_OBSERVATION_VERSION);
     field(" ms=",observation.functional_ms);field(" session=",db.session);field(" rc=",0);bth_end();
-   }
   }
   if(db.finished && db.rc) { rc=92; }
   if(i>=(CONFIG_DUAL_MSG_MODE!=2?590:CONFIG_DUAL_IPC_SECONDS+5) && !db.finished) { rc=93; }

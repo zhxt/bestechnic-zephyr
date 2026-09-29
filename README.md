@@ -31,6 +31,7 @@ The integration implements dual-core startup, basic kernel operation, and inter-
 | Bluetooth | Dual-mode Bluetooth 5.3 and LE Audio | Not integrated |
 | Audio | ADC/DAC, audio interfaces, ANC/EQ | Not integrated |
 | Sensor Hub / NPU | STAR-MC1, sensor engine, BECO NPU | Not integrated |
+| GPIO qualification | GPIO pads | Optional input/LED profiles via a restricted BTH service; no Zephyr GPIO controller |
 | General peripherals | GPIO, I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers yet |
 | Clock and power | Clock and power-management resources | HAL startup configuration at 24 MHz on both cores; Zephyr system power management not integrated |
 
@@ -68,6 +69,7 @@ The full image is `build/bes2700yp/main/zephyr.bin`; accompanying files are in `
 - [Bestechnic HAL module](docs/hal.md)
 - [Contributing](CONTRIBUTING.md)
 - [Origin and licensing](THIRD_PARTY_NOTICES.md)
+- [Restricted GPIO qualification](docs/gpio.md)
 
 ## License
 

@@ -34,3 +34,9 @@ zephyr_compile_options(-ffile-prefix-map=${bes_workspace}=workspace
   -ffile-prefix-map=${bes_build}=build
   $<$<COMPILE_LANGUAGE:ASM>:-Wa,--debug-prefix-map=${bes_workspace}=workspace>
   $<$<COMPILE_LANGUAGE:ASM>:-Wa,--debug-prefix-map=${bes_build}=build>)
+
+if(CONFIG_BES2700YP_GPIO_VALIDATION GREATER 0)
+  target_sources(app PRIVATE src/gpio_validation.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/gpio_client.c
+    ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/gpio_contract.c)
+endif()

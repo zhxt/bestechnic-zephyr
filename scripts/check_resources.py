@@ -148,6 +148,25 @@ def audit(root, release, zephyr):
         for key in ('CONFIG_SERIAL', 'CONFIG_GPIO', 'CONFIG_PINCTRL', 'CONFIG_CLOCK_CONTROL',
                     'CONFIG_RESET', 'CONFIG_PM', 'CONFIG_PM_DEVICE', 'CONFIG_TICKLESS_KERNEL'):
             expect(core, None, config.get(key, 'n') == 'n', 'unreviewed-runtime-owner', key)
+        gpio_mode = int(config.get('CONFIG_BES2700YP_GPIO_VALIDATION', '0'))
+        expect(core, None, gpio_mode in ((0, 1, 2) if core == 'bth' else (0,)),
+               'gpio-owner', 'restricted GPIO service is callable only from BTH')
+        if gpio_mode and core == 'bth':
+            manifest_path = release / 'manifest.json'
+            layout_path = release / 'layout.json'
+            paths.extend([manifest_path, layout_path])
+            manifest = json.loads(manifest_path.read_text())
+            layout = json.loads(layout_path.read_text())
+            wanted = {'gpio-input': 1, 'gpio-led': 2}.get(manifest.get('validation_profile'))
+            service = layout.get('gpio_service', {})
+            expect(core, None, layout.get('validation_profile') == manifest.get('validation_profile')
+                   and gpio_mode == wanted and service.get('mode') == gpio_mode
+                   and service.get('capabilities') == (8 if gpio_mode == 1 else 24),
+                   'gpio-profile', 'GPIO profile/config/ELF capabilities must match')
+            report['gpio_qualification'] = dict(owner='BTH bootstrap service',
+                inputs=['P2_0', 'P2_1'], outputs=['P1_4'] if gpio_mode == 2 else [],
+                unchanged=['P1_5', 'P2_2', 'P2_3'], irq='polling only',
+                pin_voltage='unchanged; requires board measurement')
         cpu = tree.get_node('/cpus/cpu@0')
         expect(core, cpu, core_policy['cpu'] in strings(cpu, 'compatible') and enabled(cpu)
                and number(cpu, 'clock-frequency') == macros['BTH_CPU_HZ'],

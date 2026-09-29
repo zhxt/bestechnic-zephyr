@@ -35,7 +35,9 @@ def analyze(text, manifest, core, scope='long'):
     terminal = None
     last_time = None
     completed = False
-    if not scenario.m55_restart:
+    if scenario.gpio_mode:
+        terminal_token = 'zephyr_gpio result '
+    elif not scenario.m55_restart:
         terminal_token = 'zephyr_msg result '
     elif not scenario.fault_case or (scenario.recovery and not scenario.recovery_fail_step):
         terminal_token = 'zephyr_lifecycle session '

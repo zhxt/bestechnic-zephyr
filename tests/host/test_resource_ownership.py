@@ -119,6 +119,24 @@ class ResourceOwnership(unittest.TestCase):
         self.assertEqual(report['hardware'], 'not_tested')
         self.assertEqual(report['bootstrap_reserved_pads'], ['P2_2', 'P2_3'])
 
+    def test_gpio_qualification_cannot_claim_m55_or_mismatched_capability(self):
+        config = self.release / 'bth.config'
+        original = config.read_text()
+        config.write_text(original+'CONFIG_BES2700YP_GPIO_VALIDATION=1\n')
+        manifest = self.release / 'manifest.json'
+        data = dict(validation_profile='gpio-input', gpio_service=dict(mode=1, capabilities=8))
+        manifest.write_text(json.dumps(data))
+        (self.release / 'layout.json').write_text(json.dumps(data))
+        self.assertEqual(self.check()['gpio_qualification']['outputs'], [])
+        data['gpio_service']['capabilities'] = 24
+        manifest.write_text(json.dumps(data))
+        (self.release / 'layout.json').write_text(json.dumps(data))
+        self.check('gpio-profile')
+        config.write_text(original)
+        m55 = self.release / 'm55.config'
+        m55.write_text(m55.read_text()+'CONFIG_BES2700YP_GPIO_VALIDATION=1\n')
+        self.check('gpio-owner')
+
     def test_same_core_irq_conflict_is_rejected(self):
         self.extra('bth', 'other { interrupts = <39 3>; interrupt-parent = <&nvic>; };')
         self.check('irq-conflict')

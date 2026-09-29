@@ -6,6 +6,10 @@
 #include <bes2700yp_resources.h>
 #include <bes2700yp_uart_resources.h>
 
+#ifdef BES_GPIO_MODE
+#include <bes2700yp_gpio.h>
+extern const struct bes_resource_descriptor bes_gpio_service;
+#endif
 extern const struct bes_resource_descriptor bes_resource_service;
 extern const struct bes_resource_descriptor bes_arbitration_service;
 extern const struct bes_resource_descriptor bes_uart_resource_service;
@@ -98,6 +102,9 @@ static __attribute__((noinline)) void arbitration_reentry_probe(void)
 static __attribute__((noinline,noclone)) int dual_dispatch(uint32_t op, uint32_t arg)
 {
  if (op == BES_RESOURCE_DISCOVER) {
+#ifdef BES_GPIO_MODE
+  if (arg == BES_GPIO_ABI) { return (int32_t)(uintptr_t)&bes_gpio_service; }
+#endif
   if (arg == BES_ARBITRATION_ABI) { return (int32_t)(uintptr_t)&bes_arbitration_service; }
   if (arg == BES_UART_RESOURCE_ABI) { return (int32_t)(uintptr_t)&bes_uart_resource_service; }
   return arg == BES_RESOURCE_ABI ? (int32_t)(uintptr_t)&bes_resource_service : BES_RESOURCE_UNSUPPORTED;

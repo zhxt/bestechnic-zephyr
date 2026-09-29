@@ -184,3 +184,7 @@ M55 TCM 还涉及物理 RAM bank 映射。REPARK 恢复操作在对端保持复�
 空实现不能返回成功来宣称硬件能力。当前 bootstrap HAL ABI 面向 BTH，不能由 M55 直接调用。
 UART 交接需要发送排空、IRQ/状态所有权移交及唯一运行期写入者，并保留早期和 fatal 诊断。
 通用 GPIO/pinctrl、电源域控制及系统 PM 仍需要独立实现和实板验证。
+
+## 受限 GPIO 场景
+
+可选的 [GPIO 验证](../gpio.zh-CN.md)服务轮询 P2_0/P2_1，并可驱动 P1_4，保持 P1_5 和 UART 引脚原状。普通场景不启用；尚无 Zephyr GPIO/pinctrl 控制器和 GPIO 中断支持。实际板卡接线及电平需确认。

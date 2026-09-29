@@ -281,3 +281,7 @@ mkdir -p validation
 UART 资源证据使用 `layout.json` 中独立版本的描述符。每个必需系统快照阶段还需对应 UART 快照，
 核对配置输入频率、总线/功能门控、复位释放及 AON 引脚路由。缺失记录或字段变化不能通过；
 仅有系统描述符不能视作支持 UART 资源读回。
+
+## 交互式 GPIO 场景
+
+`gpio-input` 与 `gpio-led` 在顺序 IPC 基础上增加人工按键循环和可选 LED 输出。见[接线、电气核对、操作与验收](gpio.zh-CN.md)。使用 `analyze_dual_message.py --scope short` 和对应 release/layout.json 分析。

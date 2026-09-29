@@ -52,17 +52,20 @@ def check_control_flow(rows, name):
         visit(rows[0][0])
 
 
-def audit(elf, bth, cross, root, generated, uart=False, arbitration=False):
-    prefix = 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
+def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False):
+    prefix = 'bes_gpio' if gpio else 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
     descriptor = prefix + '_service'
     dispatch = prefix + '_dispatch'
     allowed = ALLOWED | {dispatch} | ({'bes2700yp_uart0_read'} if uart else set())
+    if gpio:
+        allowed |= {'bes2700yp_gpio_access', 'gpio_masked', 'bes_arbitration_enter', 'bes_arbitration_leave'}
     library = generated / 'resource_validator.so'
     subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'include/bestechnic/bes2700yp'),
                     str(root / 'platforms/bes2700yp/resources/contract.c'),
                     str(root / 'platforms/bes2700yp/resources/uart_contract.c'),
-                    str(root / 'platforms/bes2700yp/resources/arbitration_contract.c'), '-o', str(library)], check=True)
+                    str(root / 'platforms/bes2700yp/resources/arbitration_contract.c'),
+                    str(root / 'platforms/bes2700yp/resources/gpio_contract.c'), '-o', str(library)], check=True)
     validator = ctypes.CDLL(str(library))
     validate_descriptor = getattr(validator, prefix + '_descriptor_valid')
     validate_descriptor.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
@@ -154,6 +157,28 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False):
     if stack > 256:
         raise ValueError('resource dispatch exceeds 256-byte stack budget')
     bsyms = symbols(bth, cross)
+    if gpio:
+        fault = syms.get('gpio_fault', 0)
+        if (not fault or sizes.get('gpio_fault') != 4 or
+                not syms.get('__bss_start__', 0) <= fault <= syms.get('__bss_end__', 0)-4):
+            raise ValueError('GPIO fault latch is outside audited bootstrap BSS')
+        for name in ('bes_gpio_connect', 'bes_gpio_call', 'bes_gpio_descriptor_valid',
+                     'bes_gpio_validation_init', 'bes_gpio_validation_poll'):
+            if name not in bsyms:
+                raise ValueError('missing BTH GPIO consumer: ' + name)
+        for caller, targets in {'bes_gpio_validation_init': ('bes_gpio_connect', 'bes_gpio_call'),
+                'bes_gpio_connect': ('dual_service_validate', 'bes_resource_descriptor_address_valid',
+                                     'bes_gpio_descriptor_valid')}.items():
+            code = subprocess.check_output([cross+'objdump', '-d', '--disassemble='+caller, str(bth)], text=True)
+            for target in targets:
+                if not re.search(r'\bbl(?:\.w)?\s+[0-9a-f]+ <'+target+r'>', code):
+                    raise ValueError('GPIO client bypasses validation: ' + target)
+        return dict(abi=words[1], capabilities=words[3], descriptor=address, dispatch=words[4],
+                    request_bytes=words[5], snapshot_bytes=words[6], descriptor_bytes=32,
+                    buffer=[0x20540000, 0x2055c000], stack_bound_bytes=stack,
+                    reachable=sorted(seen), descriptor_read_only=True, integer_only=True,
+                    bounded_call_graph=True, context='privileged BTH thread',
+                    iomux_lock='AON MEMSC0 single attempt', fault_latch=fault)
     for name in ('resources_init', prefix + '_connect', prefix + '_read',
                  prefix + '_descriptor_valid', 'bes_resource_probe'):
         if name not in bsyms:
