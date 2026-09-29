@@ -6,6 +6,8 @@ target_sources(app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700y
 target_sources(app PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/contract.c
   ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/client.c
+  ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/uart_contract.c
+  ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/uart_client.c
   ${CMAKE_CURRENT_LIST_DIR}/../../../platforms/bes2700yp/resources/probe.c)
 zephyr_get(DUAL_GENERATED_DIR SYSBUILD)
 if(CONFIG_BES2700_M55_RESTART)

@@ -10,7 +10,7 @@ BTH 和 M55 的 Zephyr 镜像不直接链接 HAL 静态库；完整镜像中的�
 
 [资源 ABI](../include/bestechnic/bes2700yp/bes2700yp_resources.h)通过 BTH 常驻
 bootstrap 提供系统快照。BTH 应用调用 `bes_resource_read()`，两核 Zephyr 均不直接
-链接厂商 HAL。能力位只声明系统快照，不声明 UART 输入频率、mux、上下拉、电压读回或资源写操作。
+链接厂商 HAL。该描述符只声明系统快照；UART 读回使用下文的独立描述符，两者均不授予资源写操作或电压控制。
 
 发现接口使用原有 32 字节 dual service 的操作 9，不依赖 M55 PREPARE。
 返回的 32 字节描述符位于只读 Flash，分别校验其数据地址与 Thumb 执行入口。
@@ -34,6 +34,28 @@ PARK、RELEASE 和保持复位阶段可使用现有 HAL 寄存器读回及 24 MH
 ABI/操作/资源映射为 `-ENOTSUP`，调用上下文错误映射为 `-EPERM`，未连接映射为
 `-ENODEV`，响应不合法映射为 `-EIO`；失败时须丢弃输出。后续状态修改操作仍须满足
 下述仲裁契约，不能由只读能力推导写权限。
+
+## UART0 只读资源服务
+
+[UART 资源 ABI](../include/bestechnic/bes2700yp/bes2700yp_uart_resources.h)通过发现操作 9、参数 2 返回独立 ABI 2 描述符，能力值为 2，请求 96 字节、快照 64 字节。
+发现参数 1 保留系统 ABI 1 的原描述符与能力；两类描述符分别严格验证，缺少 UART 支持时明确报错。
+
+`bes_uart_resource_connect()` 和早期 UART 快照与系统服务一起在首个 PRE_KERNEL_1 初始化器执行。
+`bes_uart_resource_read()` 通过常驻桥接，仅接受 BTH 特权早期/线程调用，完整校验请求范围后访问。
+桥接保存/恢复 PRIMASK，采样变化映射为 `-EBUSY`，不写资源配置。
+
+HAL 读取 BTH CMU 的 UART0 源/分频、总线和功能门控/复位，以及 AON P2_2/P2_3 的 mux/pull。
+两次掩码后的配置采样必须一致；这不能排除 ABA 或证明全局原子性，当前契约要求 BTH 独占配置。
+不取得 MEMSC、不调用 IOMUX setter；只访问 Zephyr 前已经准备好的 BTH/AON 寄存器，M55 域未准备时也不访问 SYS。
+
+valid 位 0 表示配置输入频率、位 1 表示门控/复位、位 2 表示 AON 数字引脚路由。
+源 1 为晶振、2 为晶振倍频、3 为 PLL；PLL 仅提供分频信息，不声明频率有效。
+时钟关闭与频率未知分别表达；频率来自寄存器选择和 HAL 参考源信息，不等于外部测频。
+门控/复位位 0 对应总线、位 1 对应功能模块；引脚编号为 bank*8+index，pull 位 0 为 RX、位 1 为 TX。
+路由未知时保留 mux/pull 原始读回，但不置路由有效位；连接器和电压信息须另行确认。
+
+应用在每次系统资源探测旁记录 UART 快照。清单要求早期、活动阶段记录，生命周期场景还要求最终保持复位阶段记录。
+记录缺失、格式错误、字段变化或 ABI 不符均不能获得完整验收。UART 输出所有权保持现有契约。
 
 ## 运行期资源接口设计
 

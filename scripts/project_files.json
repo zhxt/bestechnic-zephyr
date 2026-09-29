@@ -5,7 +5,7 @@
   "source_suffixes": [".c", ".h", ".S", ".py", ".cmake", ".txt", ".conf", ".overlay", ".yaml", ".yml", ".dts", ".dtsi", ".ld", ".json"],
   "source_names": ["CMakeLists.txt", "Kconfig*", "*_defconfig"],
   "build": {
-    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "scripts/project_files.json", "scripts/project_files.py", "scripts/package_source.py", "scripts/hal_blobs.py", "scripts/module_lock.py", "scripts/firmware.py", "scripts/validation_profiles.py", "scripts/analyze_lifecycle_contract.py", "scripts/analyze_observation.py", "scripts/audit_dual.py", "scripts/audit_resources.py", "scripts/analyze_resources.py", "scripts/check_bth_layout.py", "scripts/pack_bth_payload.py", "scripts/pack_m55_payload.py", "apps/bes2700yp/bth/src/main.c", "apps/bes2700yp/m55/src/main.c", "platforms/bes2700yp/boot/t2-machine-code.json"],
+    "required": ["CMakeLists.txt", "Kconfig", "west.yml", "module-lock.json", "hal-release.sha256", "zephyr/module.yml", "scripts/project_files.json", "scripts/project_files.py", "scripts/package_source.py", "scripts/hal_blobs.py", "scripts/module_lock.py", "scripts/firmware.py", "scripts/validation_profiles.py", "scripts/analyze_lifecycle_contract.py", "scripts/analyze_observation.py", "scripts/audit_dual.py", "scripts/audit_resources.py", "scripts/analyze_resources.py", "scripts/analyze_uart_resources.py", "scripts/check_bth_layout.py", "scripts/pack_bth_payload.py", "scripts/pack_m55_payload.py", "apps/bes2700yp/bth/src/main.c", "apps/bes2700yp/m55/src/main.c", "platforms/bes2700yp/boot/t2-machine-code.json"],
     "directories": ["apps", "bsp", "include", "platforms", "sysbuild"]
   },
   "archive": {

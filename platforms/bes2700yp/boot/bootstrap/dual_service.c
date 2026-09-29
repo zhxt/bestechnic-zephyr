@@ -3,8 +3,10 @@
  * No RTX, DMA, vendor trace, IRQ registration or automatic M55 application. */
 #include "arch.h"
 #include <bes2700yp_resources.h>
+#include <bes2700yp_uart_resources.h>
 
 extern const struct bes_resource_descriptor bes_resource_service;
+extern const struct bes_resource_descriptor bes_uart_resource_service;
 #include <bestechnic/bes2700yp/hw.h>
 #include "bes2700_dual_boot.h"
 static uint32_t phase, release_sp, release_pc;
@@ -79,6 +81,7 @@ static __attribute__((noinline)) int repark_cpu(void)
 static int dual_dispatch(uint32_t op, uint32_t arg)
 {
  if (op == BES_RESOURCE_DISCOVER) {
+  if (arg == BES_UART_RESOURCE_ABI) { return (int32_t)(uintptr_t)&bes_uart_resource_service; }
   return arg == BES_RESOURCE_ABI ? (int32_t)(uintptr_t)&bes_resource_service : BES_RESOURCE_UNSUPPORTED;
  }
 #ifdef BES_BTH_M55_RESTART

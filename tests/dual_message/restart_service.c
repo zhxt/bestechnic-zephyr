@@ -70,6 +70,7 @@ void bes2700yp_snapshot(struct bes2700yp_hw_snapshot *h)
 }
 #include <bes2700yp_resources.h>
 const struct bes_resource_descriptor bes_resource_service={0};
+const struct bes_resource_descriptor bes_uart_resource_service={0};
 #include "../../platforms/bes2700yp/boot/bootstrap/dual_service.c"
 
 int main(void)
@@ -79,7 +80,8 @@ int main(void)
  assert(mmap((void *)0x2055c000,4096,PROT_READ|PROT_WRITE,
   MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==(void *)0x2055c000);
  dual_service_init();assert(((struct dual_service *)DUAL_SERVICE_ADDR)->layout==BES_LIFECYCLE_LAYOUT);
- assert(dual_dispatch(BES_RESOURCE_DISCOVER,2)==BES_RESOURCE_UNSUPPORTED);
+ assert(dual_dispatch(BES_RESOURCE_DISCOVER,3)==BES_RESOURCE_UNSUPPORTED);
+ assert(dual_dispatch(BES_RESOURCE_DISCOVER,2)==(int32_t)(uintptr_t)&bes_uart_resource_service);
  assert(dual_dispatch(BES_RESOURCE_DISCOVER,BES_RESOURCE_ABI)==(int32_t)(uintptr_t)&bes_resource_service);
  assert(!dual_service_phase() && !powers && !starts && !stops);
  assert(dual_dispatch(BES_LIFECYCLE_REPARK,0)==-4);

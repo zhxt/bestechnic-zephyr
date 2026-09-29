@@ -268,6 +268,8 @@ def final(a):
                                                   get_profile(identity['validation_profile']).m55_restart)
     report['resource_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated)
     layout['resource_service'] = report['resource_service']
+    report['uart_resource_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, uart=True)
+    layout['uart_resource_service'] = report['uart_resource_service']
     layout.update(version='V08c_QMSG_T2', build_architecture='bestechnic-zephyr-v1', test=8,
         log_version=3, prefix_version=1, duration_seconds=identity['heartbeat'],
         log_clock_state=[0x2055c180,0x2055c1a0], m55_build=f'0x{identity["m55_build"]:08x}',

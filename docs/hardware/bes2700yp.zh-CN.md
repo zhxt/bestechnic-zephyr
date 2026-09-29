@@ -60,6 +60,7 @@ BTH 的官方处理器名称为 STAR-MC1，当前 Zephyr 移植使用 Cortex-M33
 | 核间通知 | [mailbox 驱动](../../bsp/drivers/mbox/mbox_bes2700.c)接入 Zephyr MBOX API | 两核均启用 `CONFIG_MBOX` 和 `CONFIG_MBOX_BES2700` | 仅传递通知，不携带消息内容；忙时重复发送合并为一次待发通知 |
 | 共享内存消息 | [消息 worker](../../platforms/bes2700yp/ipc/worker.c)在共享区收发消息，配合 mailbox 通知 | 启用双向消息收发 | 使用本项目协议，尚未接入 Zephyr IPC service / RPMsg |
 | BTH UART | [UART 驱动](../../bsp/drivers/serial/uart_bes2700.c)实现轮询和中断 API | 未启用 Zephyr Serial/Console；当前日志使用 bootstrap 串口接口 | 固定 8N1，依赖 bootstrap 准备时钟与引脚；未提供异步/DMA API 或运行时串口参数配置 |
+| 资源读回 | [系统及 UART 服务](../hal.zh-CN.md#uart0-只读资源服务)提供有界快照 | BTH 应用早期及运行阶段探测 | 仅 UART0；配置读回，不证明外部频率/电压，不移交输出所有权 |
 | 系统计时与时钟 | Zephyr Cortex-M SysTick，HAL 完成启动时钟配置 | 两核均配置为 24 MHz，内核每秒 1000 tick；`CONFIG_TICKLESS_KERNEL=n`、`CONFIG_PM=n` | 24 MHz 是工程配置，不表示芯片最高主频；未集成动态调频与 Zephyr 系统低功耗管理 |
 | FPU / MPU | [SoC 配置](../../bsp/soc/bestechnic/bes2700yp/Kconfig)声明硬件能力，M55 提供 [MPU 区域定义](../../bsp/soc/bestechnic/bes2700yp/mpu_regions.c) | 两核应用均设置 `CONFIG_FPU=n`、`CONFIG_ARM_MPU=n`、`CONFIG_HW_STACK_PROTECTION=n` | 默认应用不覆盖这些功能，启用后的运行验证需单独完成 |
 | 启动与运行内存 | DTS/链接脚本定义运行布局，bootstrap 使用 HAL 初始化硬件；见[架构说明](../architecture.zh-CN.md) | 使用当前[运行内存布局](#运行内存布局) | 启动和装载依赖匹配的 HAL 模块及内存布局 |

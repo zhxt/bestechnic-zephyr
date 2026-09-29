@@ -295,3 +295,9 @@ Offline packaging checks the read-only descriptor, the client initializer and
 validators, the complete retained call graph, and the service stack budget.
 These checks do not replace a physical startup test or certify a new board's
 pin mapping or voltage levels.
+
+UART resource evidence uses the independently versioned UART descriptor recorded
+in `layout.json`. Each required system-snapshot phase also requires a UART
+snapshot with the expected input clock, active bus/functional gates, released
+resets and AON pin route. The parser rejects missing records and changed fields;
+a system-only descriptor does not provide UART readback support.

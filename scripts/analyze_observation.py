@@ -2,6 +2,7 @@
 """Versioned post-functional observations; never synthesize firmware evidence."""
 import re
 import analyze_resources
+import analyze_uart_resources
 from validation_profiles import get_profile, layered
 
 ROW = re.compile(r'(\d+)/([IE])/BTH/OBSERVE/MAIN \| zephyr_observe (\w+) (.+) !')
@@ -192,7 +193,8 @@ def run(profile_module, text, manifest, core, scope):
     class Scoped:
         @staticmethod
         def analyze(data, meta):
-            return analyze_resources.run(data, meta, lambda clean: analyze(clean, meta, core, scope))
+            return analyze_uart_resources.run(data, meta, lambda uart_clean:
+                analyze_resources.run(uart_clean, meta, lambda clean: analyze(clean, meta, core, scope)))
     previous = profile_module.dual
     try:
         profile_module.dual = Scoped

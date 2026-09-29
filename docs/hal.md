@@ -9,8 +9,8 @@
 The [resource ABI](../include/bestechnic/bes2700yp/bes2700yp_resources.h) exposes
 system snapshots through the resident BTH bootstrap. BTH applications use
 `bes_resource_read()`; neither Zephyr core links the vendor HAL directly.
-The service offers a system-snapshot capability. It does not advertise UART
-frequency, pinmux, pull or voltage readback, or resource writes.
+This descriptor offers only the system-snapshot capability. UART readback uses
+the separate descriptor below; neither descriptor grants resource writes or voltage control.
 
 Discovery uses operation 9 of the existing 32-byte dual service, independently
 of M55 preparation. The returned 32-byte descriptor resides in read-only Flash;
@@ -43,6 +43,42 @@ invalid execution context to `-EPERM`, an unconnected client to `-ENODEV`, and
 an invalid response to `-EIO`. On failure the caller must discard the output.
 Future state-changing operations require the arbitration contract below;
 they are not implied by the read-only capability.
+
+## UART0 read-only resource service
+
+The [UART resource ABI](../include/bestechnic/bes2700yp/bes2700yp_uart_resources.h)
+uses discovery operation 9 with argument 2. It has its own ABI 2 descriptor,
+capability 2, 96-byte request and 64-byte snapshot. Discovery argument 1 retains
+the system ABI 1 descriptor and capability unchanged; a system descriptor cannot
+be accepted as a UART descriptor. Missing UART support returns an explicit error.
+
+`bes_uart_resource_connect()` and the early UART snapshot run in the same first
+PRE_KERNEL_1 initializer. `bes_uart_resource_read()` accepts only privileged BTH
+early/thread calls through the bounded bootstrap bridge. The bridge restores
+PRIMASK, rejects invalid request spans before dereferencing them, and reports
+changing hardware samples as `-EBUSY`. No resource configuration is written.
+
+The HAL reads BTH CMU UART0 source/divider, peripheral and functional gates and
+reset release, plus AON P2_2/P2_3 mux/pull. Two masked configuration samples must
+match. They detect observed changes, not ABA or a globally atomic snapshot; this
+profile requires sole BTH configuration ownership. No MEMSC lock or vendor
+IOMUX setter is called. Only BTH/AON registers prepared before Zephyr are read,
+including when the M55 domain is unavailable.
+
+Snapshot validity bit 0 denotes configured input frequency, bit 1 gate/reset
+readback and bit 2 the digital AON pad route. Source 1 is crystal, 2 crystal x2,
+3 PLL; PLL divider is reported but its frequency remains unavailable. A disabled
+clock gate is distinct from an unknown source frequency. Frequency derives from
+register selection and the HAL reference-source metadata, not external measurement.
+Gate/reset bit 0 refers to the peripheral bus and bit 1 to the functional block.
+Pin IDs are bank*8+index; pull bit 0 is RX and bit 1 TX. Unknown routes retain raw
+mux/pull values without setting pin-route validity. Connector wiring and voltage
+are separate board facts.
+
+The applications check UART readback alongside every existing system resource
+probe. The manifest requires matching UART records at early/released phases and,
+for lifecycle profiles, the final reset-held phase. Missing, malformed, changed
+or incompatible records invalidate acceptance. UART output ownership is unchanged.
 
 ## Runtime resource interface design
 

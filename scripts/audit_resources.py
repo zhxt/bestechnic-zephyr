@@ -51,13 +51,19 @@ def check_control_flow(rows, name):
         visit(rows[0][0])
 
 
-def audit(elf, bth, cross, root, generated):
+def audit(elf, bth, cross, root, generated, uart=False):
+    prefix = 'bes_uart_resource' if uart else 'bes_resource'
+    descriptor = prefix + '_service'
+    dispatch = prefix + '_dispatch'
+    allowed = ALLOWED | ({dispatch, 'bes2700yp_uart0_read'} if uart else set())
     library = generated / 'resource_validator.so'
     subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'include/bestechnic/bes2700yp'),
-                    str(root / 'platforms/bes2700yp/resources/contract.c'), '-o', str(library)], check=True)
+                    str(root / 'platforms/bes2700yp/resources/contract.c'),
+                    str(root / 'platforms/bes2700yp/resources/uart_contract.c'), '-o', str(library)], check=True)
     validator = ctypes.CDLL(str(library))
-    validator.bes_resource_descriptor_valid.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+    validate_descriptor = getattr(validator, prefix + '_descriptor_valid')
+    validate_descriptor.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
     validator.bes_resource_descriptor_address_valid.argtypes = [ctypes.c_uint32]
     syms = symbols(elf, cross)
     sizes = {}
@@ -67,14 +73,14 @@ def audit(elf, bth, cross, root, generated):
             sizes[words[3]] = int(words[1], 16)
     segments = parse_load_segments(run_readelf(elf))
     data = elf.read_bytes()
-    address = syms.get('bes_resource_service', 0)
-    if sizes.get('bes_resource_service') != 32 or not validator.bes_resource_descriptor_address_valid(address):
+    address = syms.get(descriptor, 0)
+    if sizes.get(descriptor) != 32 or not validator.bes_resource_descriptor_address_valid(address):
         raise ValueError('resource descriptor placement/size')
     offset = file_span(segments, address, 32)
     words = struct.unpack_from('<8I', data, offset)
-    if not validator.bes_resource_descriptor_valid((ctypes.c_uint32 * 8)(*words)):
+    if not validate_descriptor((ctypes.c_uint32 * 8)(*words)):
         raise ValueError('resource descriptor rejected by actual client validator')
-    if words[4] != syms.get('bes_resource_dispatch', 0) | 1:
+    if words[4] != syms.get(dispatch, 0) | 1:
         raise ValueError('resource descriptor points to a different dispatch')
     disassembly = subprocess.check_output([cross+'objdump', '-d', str(elf)], text=True)
     functions = {}
@@ -94,7 +100,7 @@ def audit(elf, bth, cross, root, generated):
             raise ValueError('recursive resource service call')
         veneer = name.startswith('__') and name.endswith('_veneer')
         target = name[2:-7] if veneer else None
-        if name not in ALLOWED and not (veneer and target in ALLOWED):
+        if name not in allowed and not (veneer and target in allowed):
             raise ValueError('unaudited resource callee: ' + name)
         if name in seen:
             return frames[name]
@@ -142,12 +148,12 @@ def audit(elf, bth, cross, root, generated):
         active.remove(name); seen.add(name)
         return frames[name]
 
-    stack = walk('bes_resource_dispatch')
+    stack = walk(dispatch)
     if stack > 256:
         raise ValueError('resource dispatch exceeds 256-byte stack budget')
     bsyms = symbols(bth, cross)
-    for name in ('resources_init', 'bes_resource_connect', 'bes_resource_read',
-                 'bes_resource_descriptor_valid', 'bes_resource_probe'):
+    for name in ('resources_init', prefix + '_connect', prefix + '_read',
+                 prefix + '_descriptor_valid', 'bes_resource_probe'):
         if name not in bsyms:
             raise ValueError('missing BTH resource consumer: ' + name)
     entry = bsyms.get('__init_resources_init', 0)
@@ -157,9 +163,9 @@ def audit(elf, bth, cross, root, generated):
     off = file_span(bsegments, entry, 8)
     if struct.unpack_from('<2I', bth.read_bytes(), off) != (bsyms['resources_init'] | 1, 0):
         raise ValueError('resource initializer registration mismatch')
-    for caller, targets in {'resources_init': ('bes_resource_connect', 'bes_resource_read'),
-                            'bes_resource_connect': ('dual_service_validate',
-                                'bes_resource_descriptor_address_valid', 'bes_resource_descriptor_valid')}.items():
+    for caller, targets in {'resources_init': (prefix + '_connect', prefix + '_read'),
+                            prefix + '_connect': ('dual_service_validate',
+                                'bes_resource_descriptor_address_valid', prefix + '_descriptor_valid')}.items():
         code = subprocess.check_output([cross+'objdump', '-d', '--disassemble='+caller, str(bth)], text=True)
         for target in targets:
             if not re.search(r'\bbl(?:\.w)?\s+[0-9a-f]+ <'+target+r'>', code):

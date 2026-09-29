@@ -16,6 +16,6 @@ manifest:
     - name: hal_bestechnic
       path: modules/hal/bestechnic
       url: https://github.com/zhxt/hal_bestechnic.git
-      revision: fa657ee38d31cbccdf556b3822db8d258f529e58
+      revision: b40bf4e5ca2623e714880289afe58ee73c991aac
   self:
     path: bestechnic-zephyr
