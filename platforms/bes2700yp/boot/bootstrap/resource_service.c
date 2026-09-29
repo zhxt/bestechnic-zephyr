@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "arch.h"
+#include "arbitration.h"
 #include <bes2700yp_resources.h>
 #include <bestechnic/bes2700yp/hw.h>
 
@@ -22,6 +23,10 @@ int32_t bes_resource_dispatch(uint32_t op, uint32_t address, uint32_t bytes)
 	 * during a lifecycle transition, preserving the caller's interrupt mask. */
 	uint32_t mask = __get_PRIMASK();
 	__disable_irq();
+	if (bes_arbitration_busy()) {
+		__set_PRIMASK(mask);
+		return BES_RESOURCE_BUSY;
+	}
 	out->abi = BES_RESOURCE_ABI;
 	out->bytes = sizeof(*out);
 	out->valid = BES_RESOURCE_VALID_PHASE;

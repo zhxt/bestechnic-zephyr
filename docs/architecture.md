@@ -73,7 +73,7 @@ Allocate any descriptor or scratch storage explicitly in linker/resource contrac
 and audits; apparent gaps in diagnostic memory are not free allocations.
 
 Code ownership in this design assigns `platforms/bes2700yp/resources/` to the BTH
-client and arbitration, `platforms/bes2700yp/boot/bootstrap/` to the resident backend,
+client, `platforms/bes2700yp/boot/bootstrap/` to the resident backend and arbitration,
 and `include/bestechnic/bes2700yp/` to the shared project contract. Zephyr-facing drivers
 and bindings belong in `bsp/`; vendor implementation remains in the HAL producer.
 Do not add direct vendor headers or a second HAL copy to either kernel. An M55 IPC

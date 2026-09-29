@@ -101,6 +101,7 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 | `ipc-backpressure` | Continuous bidirectional traffic for 600 s, including slow consumers and counter closure | 610 s |
 | `ipc-fault-injection` | Fault injection on both cores, detection, and normal traffic before/after | At least 600 s (long) |
 | `ipc-backpressure-1h` | Continuous bidirectional traffic for 3,600 s and final counter closure | 3,610 s |
+| `resource-arbitration` | Restart sessions with nested lifecycle/read rejection and deferred STOP checks | Functional completion plus selected 60 s short or 600 s long scope |
 | `m55-restart` | Initial M55 start plus ten normal restarts; 1,000 messages each direction per session | At least 600 s (long) |
 | `m55-ready-timeout` | Halt M55 before READY; detect timeout and isolate it | At least 600 s (long) |
 | `m55-heartbeat-stop` | Halt M55 after ten heartbeat publications; detect stalled heartbeat and isolate it | At least 600 s (long) |
@@ -116,7 +117,7 @@ The default `ipc-backpressure` runs bidirectional backpressure traffic for 600 s
 
 For sequential and fault-injection profiles, 600 seconds is a heartbeat observation endpoint, not a required message-phase duration. Backpressure profiles include ten additional heartbeat seconds after messages stop. Read acceptance parameters from that package's `layout.json`.
 
-For `m55-restart`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and the selected observation scope. Hardware evidence belongs to the matching image and its separate validation report.
+For `m55-restart` and `resource-arbitration`, use the [restart contract](m55-restart.md) and its packaged `analyze_dual_restart.py`. The run must contain 11 complete sessions and the selected observation scope. Hardware evidence belongs to the matching image and its separate validation report.
 
 For example, build fault injection in its own directory:
 

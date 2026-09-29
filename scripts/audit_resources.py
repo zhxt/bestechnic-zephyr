@@ -8,6 +8,7 @@ from pack_m55_payload import parse_load_segments, run_readelf
 from check_bth_layout import symbols
 
 ALLOWED = {'bes_resource_dispatch', 'bes_resource_buffer_valid', 'dual_service_phase',
+           'bes_arbitration_busy',
            'bes2700yp_snapshot', 'bes2700yp_clocks_are_24m',
            'hal_cmu_axi_sys_get_freq', 'hal_cmu_sys_get_freq', 'hal_cmu_get_crystal_freq'}
 
@@ -51,16 +52,17 @@ def check_control_flow(rows, name):
         visit(rows[0][0])
 
 
-def audit(elf, bth, cross, root, generated, uart=False):
-    prefix = 'bes_uart_resource' if uart else 'bes_resource'
+def audit(elf, bth, cross, root, generated, uart=False, arbitration=False):
+    prefix = 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
     descriptor = prefix + '_service'
     dispatch = prefix + '_dispatch'
-    allowed = ALLOWED | ({dispatch, 'bes2700yp_uart0_read'} if uart else set())
+    allowed = ALLOWED | {dispatch} | ({'bes2700yp_uart0_read'} if uart else set())
     library = generated / 'resource_validator.so'
     subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'include/bestechnic/bes2700yp'),
                     str(root / 'platforms/bes2700yp/resources/contract.c'),
-                    str(root / 'platforms/bes2700yp/resources/uart_contract.c'), '-o', str(library)], check=True)
+                    str(root / 'platforms/bes2700yp/resources/uart_contract.c'),
+                    str(root / 'platforms/bes2700yp/resources/arbitration_contract.c'), '-o', str(library)], check=True)
     validator = ctypes.CDLL(str(library))
     validate_descriptor = getattr(validator, prefix + '_descriptor_valid')
     validate_descriptor.argtypes = [ctypes.POINTER(ctypes.c_uint32)]

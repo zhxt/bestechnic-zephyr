@@ -15,6 +15,7 @@ import zlib
 from pathlib import Path
 
 from audit_resources import audit as audit_resources
+from audit_arbitration import audit as audit_arbitration
 from audit_dual import (audit_doorbell, audit_m55, check_resource_contract,
                         audit_lifecycle, audit_service_entry, audit_reset_timer, audit_repark)
 from check_bth_layout import audit, symbols
@@ -270,6 +271,10 @@ def final(a):
     layout['resource_service'] = report['resource_service']
     report['uart_resource_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, uart=True)
     layout['uart_resource_service'] = report['uart_resource_service']
+    report['arbitration_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, arbitration=True)
+    report['arbitration_service']['probe'] = get_profile(identity['validation_profile']).arbitration_probe
+    layout['arbitration_service'] = report['arbitration_service']
+    report['arbitration_guard'] = audit_arbitration(a.elf, a.cross, get_profile(identity['validation_profile']).arbitration_probe)
     layout.update(version='V08c_QMSG_T2', build_architecture='bestechnic-zephyr-v1', test=8,
         log_version=3, prefix_version=1, duration_seconds=identity['heartbeat'],
         log_clock_state=[0x2055c180,0x2055c1a0], m55_build=f'0x{identity["m55_build"]:08x}',

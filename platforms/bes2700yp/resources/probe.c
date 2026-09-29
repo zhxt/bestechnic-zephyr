@@ -3,6 +3,7 @@
 #include <cmsis_core.h>
 #include <bes2700yp_resources.h>
 #include <bes2700yp_uart_resources.h>
+#include <bes2700yp_arbitration.h>
 #include "bth_contract.h"
 
 _Static_assert(BES_RESOURCE_RAM_START == BTH_DATA_BASE && BES_RESOURCE_RAM_END == BTH_DATA_END,
@@ -11,6 +12,8 @@ static struct bes_resource_io early;
 static int early_rc;
 static struct bes_uart_resource_io uart_early;
 static int uart_early_rc;
+static struct bes_arbitration_io arbitration_early;
+static int arbitration_early_rc;
 
 static int resources_init(void)
 {
@@ -18,7 +21,9 @@ static int resources_init(void)
 	if (!early_rc) { early_rc = bes_resource_read(&early); }
 	uart_early_rc = bes_uart_resource_connect();
 	if (!uart_early_rc) { uart_early_rc = bes_uart_resource_read(&uart_early); }
-	return early_rc ? early_rc : uart_early_rc;
+	arbitration_early_rc = bes_arbitration_connect();
+	if (!arbitration_early_rc) { arbitration_early_rc = bes_arbitration_read(&arbitration_early); }
+	return early_rc ? early_rc : uart_early_rc ? uart_early_rc : arbitration_early_rc;
 }
 SYS_INIT(resources_init, PRE_KERNEL_1, 0);
 
@@ -47,6 +52,27 @@ static int uart_probe(uint32_t phase)
 	return rc;
 }
 
+static int arbitration_probe(uint32_t phase)
+{
+ struct bes_arbitration_io io;
+ int rc=arbitration_early_rc;
+ if (!phase) { io=arbitration_early; }
+ else { io=(struct bes_arbitration_io){0};if (!rc) { rc=bes_arbitration_read(&io); } }
+ const struct bes_arbitration_snapshot *s=&io.snapshot;
+ if (!rc && (s->phase!=phase || s->owner || s->pending || s->entered!=s->exited ||
+             s->probe_errors)) { rc=-1; }
+ bth_log_begin(rc ? 'E' : 'I', "RESOURCE", "MAIN");
+ bth_puts("zephyr_arbitration snapshot");
+#define FIELD(n,v) bth_field(" " n "=",(uint32_t)(v))
+ FIELD("version",BES_ARBITRATION_ABI);FIELD("build",BTH_DIAG->build);
+ FIELD("expected",phase);FIELD("rc",rc);FIELD("abi",s->abi);FIELD("bytes",s->bytes);
+#define SNAP(n) FIELD(#n,s->n);
+ BES_ARBITRATION_FIELDS(SNAP)
+#undef SNAP
+#undef FIELD
+ bth_end();return rc;
+}
+
 int bes_resource_probe(uint32_t phase)
 {
 	struct bes_resource_io io;
@@ -69,5 +95,6 @@ int bes_resource_probe(uint32_t phase)
 #undef FIELD
 	bth_end();
 	int uart_rc = uart_probe(phase);
-	return rc ? rc : uart_rc;
+	int arbitration_rc=arbitration_probe(phase);
+	return rc ? rc : uart_rc ? uart_rc : arbitration_rc;
 }

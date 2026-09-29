@@ -28,7 +28,7 @@
  * pins: bank*8+index; pull masks: bit0 RX, bit1 TX.
  * Privileged BTH early/thread only, sole configuration owner. Snapshot is
  * sampled twice under a restored local IRQ mask, not globally atomic.
- * Failure invalidates all output; -EBUSY means samples changed.
+ * Failure invalidates all output; -EBUSY means samples changed or lifecycle busy.
  * Gate state is separate from configured frequency; no voltage/calibration. */
 struct bes_uart_resource_snapshot {
 	uint32_t abi, bytes, phase;

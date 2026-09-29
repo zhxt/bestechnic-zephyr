@@ -97,6 +97,7 @@ CI 在包内校验之后执行此检查，资源冲突会阻止产物验收。�
 | ipc-backpressure | 双向持续通信 600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 610 秒 |
 | ipc-fault-injection | 双端错误注入、错误检测及前后正常通信检查，完成后继续观察心跳 | 至少 600 秒（长范围） |
 | ipc-backpressure-1h | 双向持续通信 3600 秒，覆盖背压和慢消费，结束后核对闭环计数 | 3610 秒 |
+| resource-arbitration | 重启会话及嵌套修改/读拒绝、延后 STOP 检查 | 功能完成后选择 short 60 秒或 long 600 秒 |
 | m55-restart | 首次启动 M55 后正常重启十次，每会话双向各 1000 条消息 | 至少 600 秒（长范围） |
 | m55-ready-timeout | M55 在 READY 前停止，检测超时并隔离 | 至少 600 秒（长范围） |
 | m55-heartbeat-stop | M55 发布十次心跳后停止，检测心跳停滞并隔离 | 至少 600 秒（长范围） |
@@ -112,7 +113,7 @@ CI 在包内校验之后执行此检查，资源冲突会阻止产物验收。�
 
 ipc-sequential、ipc-fault-injection 中的 600 秒不是要求消息阶段持续运行的时间。ipc-backpressure、ipc-backpressure-1h 的心跳额外观察 10 秒，以覆盖消息停止和结束状态。实际验收参数从对应包的 `layout.json` 读取。
 
-`m55-restart` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；验收需包含 11 次会话及所选范围的完整观察。实板结论以匹配镜像的独立验证报告为准。
+`m55-restart` 和 `resource-arbitration` 的详细要求见[重启契约](m55-restart.zh-CN.md)，使用包内 `analyze_dual_restart.py` 解析；验收需包含 11 次会话及所选范围的完整观察。实板结论以匹配镜像的独立验证报告为准。
 
 以下以 ipc-fault-injection 为例；选择其他配置时修改变量，各配置使用独立构建目录：
 
@@ -166,7 +167,7 @@ mkdir -p validation
 
 恢复场景使用包内 `analyze_dual_recovery.py`，见[一次受控故障恢复](m55-restart.zh-CN.md#一次受控故障恢复)。新会话完成消息和正常停止后，BTH 继续完成观察。
 
-四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
+四种消息场景使用包内 `analyze_dual_message.py` 联合检查启动、启动计时、心跳和消息记录。`m55-restart` 和 `resource-arbitration` 使用包内 `analyze_dual_restart.py`，传入相同的 `--manifest` 与 `--output` 参数。保留完整包，以便加载随包的其他解析模块；解析器和布局文件必须与所刷镜像匹配。
 
 ```sh
 .venv/bin/python "$BES_TEST_DIR/release/analyze_dual_message.py" \

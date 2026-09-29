@@ -17,6 +17,7 @@ class ValidationProfile:
     fault_case: int = 0
     recovery: bool = False
     recovery_fail_step: int = 0
+    arbitration_probe: bool = False
 
 
 PROFILES = MappingProxyType({
@@ -24,6 +25,7 @@ PROFILES = MappingProxyType({
     'ipc-backpressure': ValidationProfile(2, 600, 610),
     'ipc-fault-injection': ValidationProfile(3, 600, 600),
     'ipc-backpressure-1h': ValidationProfile(2, 3600, 3610),
+    'resource-arbitration': ValidationProfile(1, 600, 600, True, arbitration_probe=True),
     'm55-restart': ValidationProfile(1, 600, 600, True),
     'm55-ready-timeout': ValidationProfile(1, 600, 600, True, 1),
     'm55-heartbeat-stop': ValidationProfile(1, 600, 600, True, 2),
@@ -108,4 +110,6 @@ def cmake_settings(name):
     return ('# Generated validation settings; do not edit.\n'
             'set(BES_VALIDATION_PROFILES ' + ' '.join(PROFILES) + ')\n'
             'set(BES_VALIDATION_M55_RESTART '
-            + ('ON' if scenario.m55_restart else 'OFF') + ')\n')
+            + ('ON' if scenario.m55_restart else 'OFF') + ')\n'
+            'set(BES_VALIDATION_ARBITRATION_PROBE '
+            + ('ON' if scenario.arbitration_probe else 'OFF') + ')\n')

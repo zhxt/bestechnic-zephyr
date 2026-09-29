@@ -22,6 +22,7 @@ void bes2700yp_snapshot(struct bes2700yp_hw_snapshot *s)
  assert(phase>=2 && mask==1); reads++;
  *s=(struct bes2700yp_hw_snapshot){.core_vtor=0x200c0000,.ram_sel0=0x12345678};
 }
+#include "../../platforms/bes2700yp/boot/bootstrap/arbitration.c"
 #include "../../platforms/bes2700yp/boot/bootstrap/resource_service.c"
 static struct bes_resource_io *io=(void *)BES_RESOURCE_RAM_START;
 static struct bes_resource_io original;
@@ -52,6 +53,11 @@ int main(void)
  reset();phase=3;bad_clock=1;
  assert(!bes_resource_dispatch(1,(uint32_t)(uintptr_t)io,sizeof(*io)));
  assert(io->snapshot.valid==7 && !io->snapshot.clocks_24m);bad_clock=0;
+ for(unsigned m=0;m<2;m++) {
+  reset();mask=m;bes_arbitration_state.owner=3;
+  rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_BUSY);
+  assert(mask==m);bes_arbitration_state.owner=0;
+ }
  reset();ipsr=1;rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_CONTEXT);ipsr=0;
  control=1;rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_CONTEXT);control=0;
  rejected(0,BES_RESOURCE_RAM_START,96,BES_RESOURCE_UNSUPPORTED);

@@ -20,6 +20,7 @@ enum bes_resource_status {
 	BES_RESOURCE_INVALID = -1,
 	BES_RESOURCE_UNSUPPORTED = -2,
 	BES_RESOURCE_CONTEXT = -3,
+	BES_RESOURCE_BUSY = -4,
 };
 struct bes_resource_descriptor {
 	uint32_t magic, abi, bytes, capabilities, dispatch, request_bytes, snapshot_bytes, reserved;
@@ -43,6 +44,7 @@ int bes_resource_descriptor_valid(const struct bes_resource_descriptor *descript
 /* Single early BTH initializer, before resource drivers. No logging or HAL writes. */
 int bes_resource_connect(void);
 /* Privileged BTH thread/early context; caller owns the whole request buffer.
+ * A lifecycle owner returns -EBUSY without updating snapshot fields.
  * On error the output is unusable. ISR and unprivileged callers are rejected. */
 int bes_resource_read(struct bes_resource_io *io);
 /* Application validation hook; caller serializes UART output. */

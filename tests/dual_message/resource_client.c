@@ -51,9 +51,9 @@ int main(void)
  assert(!bes_resource_connect());unsigned before=calls;
  assert(bes_resource_read((void *)0x2055bfa4)==-EINVAL && calls==before);
  assert(!bes_resource_read(io) && io->snapshot.valid==1);
- int statuses[]={BES_RESOURCE_INVALID,BES_RESOURCE_UNSUPPORTED,BES_RESOURCE_CONTEXT,123};
- int errors[]={-EINVAL,-ENOTSUP,-EPERM,-EIO};
- for(unsigned i=0;i<4;i++) { response=statuses[i];assert(bes_resource_read(io)==errors[i]); }
+ int statuses[]={BES_RESOURCE_INVALID,BES_RESOURCE_UNSUPPORTED,BES_RESOURCE_CONTEXT,BES_RESOURCE_BUSY,123};
+ int errors[]={-EINVAL,-ENOTSUP,-EPERM,-EBUSY,-EIO};
+ for(unsigned i=0;i<5;i++) { response=statuses[i];assert(bes_resource_read(io)==errors[i]); }
  response=0;corrupt=1;assert(bes_resource_read(io)==-EIO);corrupt=0;
  returned=0;assert(bes_resource_connect()==-ENOTSUP);assert(bes_resource_read(io)==-ENODEV);
  return 0;

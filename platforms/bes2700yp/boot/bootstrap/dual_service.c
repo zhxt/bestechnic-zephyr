@@ -2,10 +2,12 @@
 /* Resident bare HAL bridge. Only BTH Zephyr's loader calls this service.
  * No RTX, DMA, vendor trace, IRQ registration or automatic M55 application. */
 #include "arch.h"
+#include "arbitration.h"
 #include <bes2700yp_resources.h>
 #include <bes2700yp_uart_resources.h>
 
 extern const struct bes_resource_descriptor bes_resource_service;
+extern const struct bes_resource_descriptor bes_arbitration_service;
 extern const struct bes_resource_descriptor bes_uart_resource_service;
 #include <bestechnic/bes2700yp/hw.h>
 #include "bes2700_dual_boot.h"
@@ -78,47 +80,80 @@ static __attribute__((noinline)) int repark_cpu(void)
  __DSB();return rc;
 }
 #endif
-static int dual_dispatch(uint32_t op, uint32_t arg)
+static __attribute__((noinline,noclone)) int dual_dispatch(uint32_t op, uint32_t arg);
+#ifdef BES_ARBITRATION_PROBE
+static __attribute__((noinline)) void arbitration_reentry_probe(void)
+{
+ bes_arbitration_state.probe_runs=1;
+ uint32_t bits=0;
+ if (dual_dispatch(DUAL_PARK,0)==BES_ARBITRATION_BUSY) { bits|=1U; }
+ if (dual_dispatch(DUAL_STOP,0)==BES_ARBITRATION_BUSY) { bits|=2U; }
+ if (dual_dispatch(DUAL_RELEASE,1)==-4) { bits|=4U; }
+ if (dual_dispatch(0xff,0)==-4) { bits|=8U; }
+ if (dual_dispatch(DUAL_CHECK_CLOCK,0)==BES_ARBITRATION_BUSY) { bits|=16U; }
+ bes_arbitration_state.probe_mask=bits;
+ if (bits!=31U) { bes_arbitration_state.probe_errors++; }
+}
+#endif
+static __attribute__((noinline,noclone)) int dual_dispatch(uint32_t op, uint32_t arg)
 {
  if (op == BES_RESOURCE_DISCOVER) {
+  if (arg == BES_ARBITRATION_ABI) { return (int32_t)(uintptr_t)&bes_arbitration_service; }
   if (arg == BES_UART_RESOURCE_ABI) { return (int32_t)(uintptr_t)&bes_uart_resource_service; }
   return arg == BES_RESOURCE_ABI ? (int32_t)(uintptr_t)&bes_resource_service : BES_RESOURCE_UNSUPPORTED;
  }
+ if (__get_IPSR() || (__get_CONTROL() & 1U)) { return BES_ARBITRATION_CONTEXT; }
+ if (op==DUAL_SNAPSHOT || op==DUAL_CHECK_CLOCK) {
+  uint32_t mask=__get_PRIMASK();__disable_irq();
+  if (bes_arbitration_busy()) { __set_PRIMASK(mask);return BES_ARBITRATION_BUSY; }
+  if (op == DUAL_SNAPSHOT && arg == DUAL_HW_ADDR && phase >= 2 && phase <=
+#ifdef BES_BTH_M55_RESTART
+      5
+#else
+      3
+#endif
+      ) {
+   struct bes2700yp_hw_snapshot snapshot;
+   bes2700yp_snapshot(&snapshot);
+   volatile struct dual_hw *h=DUAL_HW;
+   h->phase=phase;
+   h->core_vtor=snapshot.core_vtor;
+   h->reset_set=snapshot.reset_set; h->reset_clr=snapshot.reset_clr;
+   h->ram_sel0=snapshot.ram_sel0; h->ram_sel1=snapshot.ram_sel1;
+   h->oclk=snapshot.oclk; h->oreset=snapshot.oreset; h->sysclk=snapshot.sysclk;
+   /* The TCM window need not be accessible while the CPU is held reset. */
+   h->vector_sp=phase<4?*(volatile uint32_t *)DUAL_DTCM:0;
+   h->vector_pc=phase<4?*(volatile uint32_t *)(DUAL_DTCM+4):0;
+   h->release_sp=release_sp; h->release_pc=release_pc; __DSB(); __set_PRIMASK(mask); return 0;
+  }
+  if (op == DUAL_CHECK_CLOCK) {
+   int rc=bes2700yp_clocks_are_24m();__set_PRIMASK(mask);return rc;
+  }
+  __set_PRIMASK(mask);return -4;
+ }
+ if (op!=DUAL_PREPARE && op!=DUAL_PARK && op!=DUAL_RELEASE && op!=DUAL_STOP
+#ifdef BES_BTH_M55_RESTART
+     && op!=BES_LIFECYCLE_RESET_STATUS && op!=BES_LIFECYCLE_REPARK
+#endif
+     ) { return -4; }
+ if (arg && !(op==DUAL_RELEASE && arg==(DUAL_TRAMPOLINE|1))) { return -4; }
+ uint32_t mask;
+ int rc=bes_arbitration_enter(op,phase);
+ if (rc) { return rc; }
+ /* Recheck phase only after ownership. The owner marker is not an IRQ mask. */
+ rc=-4;
 #ifdef BES_BTH_M55_RESTART
  if(op==BES_LIFECYCLE_RESET_STATUS && phase==4) {
-  int rc=reset_status();if(rc) { phase=5; }return rc;
+  rc=reset_status();if(rc) { phase=5; }goto out;
  }
  if(op==BES_LIFECYCLE_REPARK && phase==4) {
-  return repark_cpu();
+  rc=repark_cpu();goto out;
  }
 #endif
- if (op == DUAL_SNAPSHOT && arg == DUAL_HW_ADDR && phase >= 2 && phase <=
-#ifdef BES_BTH_M55_RESTART
-     5
-#else
-     3
-#endif
-     ) {
-  struct bes2700yp_hw_snapshot snapshot;
-  bes2700yp_snapshot(&snapshot);
-  volatile struct dual_hw *h=DUAL_HW;
-  h->phase=phase;
-  h->core_vtor=snapshot.core_vtor;
-  h->reset_set=snapshot.reset_set; h->reset_clr=snapshot.reset_clr;
-  h->ram_sel0=snapshot.ram_sel0; h->ram_sel1=snapshot.ram_sel1;
-  h->oclk=snapshot.oclk; h->oreset=snapshot.oreset; h->sysclk=snapshot.sysclk;
-  /* The TCM window need not be accessible while the CPU is held reset. */
-  h->vector_sp=phase<4?*(volatile uint32_t *)DUAL_DTCM:0;
-  h->vector_pc=phase<4?*(volatile uint32_t *)(DUAL_DTCM+4):0;
-  h->release_sp=release_sp; h->release_pc=release_pc; __DSB(); return 0;
- }
- if (op == DUAL_CHECK_CLOCK) {
-  return bes2700yp_clocks_are_24m();
- }
  if (op == DUAL_PREPARE && phase == 0) {
-  int rc = bes2700yp_m55_prepare();
-  if (rc) { return rc; }
-  phase = 1; return 0;
+  rc = bes2700yp_m55_prepare();
+  if (rc) { goto out; }
+  phase = 1;rc=0;goto out;
  }
  if (op == DUAL_PARK && phase == 1) {
   /* Caller waits 2 ms after PREPARE, as required by the vendor loader. */
@@ -128,7 +163,7 @@ static int dual_dispatch(uint32_t op, uint32_t arg)
   __DSB();
   bes2700yp_m55_dtcm_enable();
   bes2700yp_m55_start(DUAL_DTCM);
-  phase = 2; return 0;
+  phase = 2;rc=0;goto out;
  }
  if (op == DUAL_RELEASE && phase == 2 && arg == (DUAL_TRAMPOLINE | 1)) {
   /* Match SDK: write and verify while M55 is parked, BEFORE CPU reset. */
@@ -137,28 +172,57 @@ static int dual_dispatch(uint32_t op, uint32_t arg)
   __DSB();
   release_sp=*(volatile uint32_t *)DUAL_DTCM;
   release_pc=*(volatile uint32_t *)(DUAL_DTCM+4);
-  if (release_sp!=DUAL_MAILBOX || release_pc!=arg) { return -5; }
+  if (release_sp!=DUAL_MAILBOX || release_pc!=arg) { rc=-5;goto out; }
 #ifdef BES_BTH_M55_RESTART
-  int rc=hold_cpu_reset(DUAL_RELEASE);if(rc) { return rc; }
+  rc=hold_cpu_reset(DUAL_RELEASE);if(rc) { goto out; }
 #else
   bes2700yp_m55_stop();
 #endif
   bes2700yp_m55_start(DUAL_DTCM);
-  phase = 3; return 0;
+  phase = 3;rc=0;goto out;
  }
  if (op == DUAL_STOP && phase >= 2) {
   /* CPU reset only: RAM, clocks and the power domain remain enabled. */
 #ifdef BES_BTH_M55_RESTART
-  if(phase==5) { return -6; }
+  if(phase==5) { rc=-6;goto out; }
   if(phase==4) {
-   int rc=reset_status();if(rc) { phase=5; }return rc;
+   rc=reset_status();if(rc) { phase=5; }goto out;
   }
-  return hold_cpu_reset(DUAL_STOP);
+  rc=hold_cpu_reset(DUAL_STOP);goto out;
 #else
-  bes2700yp_m55_stop(); phase = 4; return 0;
+  bes2700yp_m55_stop(); phase = 4;rc=0;goto out;
 #endif
  }
- return -4;
+out:
+#ifdef BES_ARBITRATION_PROBE
+ /* Deterministic same-core reentry at a safe, confirmed reset boundary.
+  * No log, sleep, IPC, extra pad write or cross-master contention claim. */
+ if (op==DUAL_STOP && !rc && phase==4 && !bes_arbitration_state.probe_runs) {
+  arbitration_reentry_probe();
+ }
+#endif
+ /* Atomically decide whether isolation is pending before releasing ownership.
+  * A pending STOP coalesces all requests during this one containment attempt.
+  * Never erase phase 5 or report a failed reset as confirmed containment. */
+ mask=__get_PRIMASK();__disable_irq();
+ if (bes_arbitration_state.pending) {
+  __set_PRIMASK(mask);
+#ifdef BES_BTH_M55_RESTART
+  int stop_rc;
+  if (phase==5) { bes2700yp_m55_stop();__DSB();stop_rc=-6; }
+  else { stop_rc=phase==4 ? reset_status() : hold_cpu_reset(DUAL_STOP); }
+  if (stop_rc) { phase=5; }
+#else
+  bes2700yp_m55_stop();phase=4;int stop_rc=0;
+#endif
+  mask=__get_PRIMASK();__disable_irq();
+  bes_arbitration_state.pending=0;
+  if (!stop_rc) { bes_arbitration_state.stop_completed++; }
+  if (!rc) { rc=stop_rc ? stop_rc : op==DUAL_STOP ? 0 : BES_ARBITRATION_CANCELLED; }
+ }
+ bes_arbitration_leave(rc);
+ __set_PRIMASK(mask);
+ return rc;
 }
 void dual_service_init(void)
 {

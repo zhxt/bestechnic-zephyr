@@ -23,6 +23,7 @@ int bes2700yp_uart0_read(struct bes2700yp_uart0_state *s)
  .clocks=3,.reset_released=3,.rx_pin=18,.tx_pin=19,.rx_mux=4,.tx_mux=4,.pull_up=1};
  return bad_clock ? -2 : 0;
 }
+#include "../../platforms/bes2700yp/boot/bootstrap/arbitration.c"
 #include "../../platforms/bes2700yp/boot/bootstrap/uart_resource_service.c"
 static struct bes_uart_resource_io *io=(void *)BES_RESOURCE_RAM_START;
 static struct bes_uart_resource_io original;
@@ -53,6 +54,11 @@ int main(void)
  reset();phase=3;bad_clock=1;
  assert(bes_uart_resource_dispatch(1,(uint32_t)(uintptr_t)io,sizeof(*io))==BES_UART_RESOURCE_BUSY);
  assert(!memcmp(io,&original,sizeof(*io)) && mask==1);bad_clock=0;
+ for(unsigned m=0;m<2;m++) {
+  reset();mask=m;bes_arbitration_state.owner=3;
+  rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_BUSY);
+  assert(mask==m);bes_arbitration_state.owner=0;
+ }
  reset();ipsr=1;rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_CONTEXT);ipsr=0;
  control=1;rejected(1,BES_RESOURCE_RAM_START,96,BES_RESOURCE_CONTEXT);control=0;
  rejected(0,BES_RESOURCE_RAM_START,96,BES_RESOURCE_UNSUPPORTED);

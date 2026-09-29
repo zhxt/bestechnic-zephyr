@@ -18,15 +18,19 @@ class RestartService(unittest.TestCase):
                             '-o', str(executable)], check=True)
             subprocess.run([str(executable)], check=True, timeout=10)
 
-    def test_actual_hal_bridge(self):
+    def test_actual_hal_bridge(self, probe=False):
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / 'service'
             subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
                             '-Wno-pointer-to-int-cast', '-Wno-int-to-pointer-cast',
                             '-fsanitize=undefined', '-fno-sanitize-recover=all',
                             '-DBES_BTH_M55_RESTART=1',
+                            *(['-DBES_ARBITRATION_PROBE=1'] if probe else []),
                             '-I', str(ROOT / 'include/bestechnic/bes2700yp'),
                             '-I', str(ROOT.parent / 'modules/hal/bestechnic/include'),
                             str(ROOT / 'tests/dual_message/restart_service.c'),
                             '-o', str(executable)], check=True)
             subprocess.run([str(executable)], check=True, timeout=10)
+
+    def test_actual_injected_hal_bridge(self):
+        self.test_actual_hal_bridge(probe=True)

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "arch.h"
+#include "arbitration.h"
 #include <bes2700yp_uart_resources.h>
 #include <bestechnic/bes2700yp/hw.h>
 uint32_t dual_service_phase(void);
@@ -16,6 +17,10 @@ int32_t bes_uart_resource_dispatch(uint32_t op, uint32_t address, uint32_t bytes
 	if (io->resource != BES_UART_RESOURCE_ID) { return BES_RESOURCE_UNSUPPORTED; }
 	uint32_t mask = __get_PRIMASK();
 	__disable_irq();
+	if (bes_arbitration_busy()) {
+		__set_PRIMASK(mask);
+		return BES_RESOURCE_BUSY;
+	}
 	struct bes2700yp_uart0_state state;
 	int rc = bes2700yp_uart0_read(&state);
 	if (!rc) {

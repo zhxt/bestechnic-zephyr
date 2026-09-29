@@ -13,13 +13,18 @@ bes2700yp_import_hal(${HAL_ROOT} ${INTEGRATION_ROOT}/hal-release.sha256)
 if(BES_M55_RESTART)
   add_compile_definitions(BES_BTH_M55_RESTART=1)
 endif()
+if(BES_ARBITRATION_PROBE)
+  add_compile_definitions(BES_ARBITRATION_PROBE=1)
+endif()
 set(abi -mthumb -mcpu=cortex-m33 -mfpu=fpv5-sp-d16 -mfloat-abi=hard)
 add_executable(adapter adapter.c handoff.S payload.S dual_service.c boot_profile.c copy_bytes.S
-  resource_service.c uart_resource_service.c
+  resource_service.c uart_resource_service.c arbitration.c
+  ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/arbitration_contract.c
   ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/uart_contract.c
   ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/contract.c
   ${GENERATED_DIR}/build_info.c)
-set_source_files_properties(resource_service.c uart_resource_service.c
+set_source_files_properties(dual_service.c resource_service.c uart_resource_service.c arbitration.c
+  ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/arbitration_contract.c
   ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/uart_contract.c
   ${INTEGRATION_ROOT}/platforms/bes2700yp/resources/contract.c
   PROPERTIES COMPILE_OPTIONS "-fstack-usage;-mgeneral-regs-only")

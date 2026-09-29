@@ -65,8 +65,8 @@ ABI 使用固定宽度整数，检查请求长度、保留字段、对齐和完�
 文件内容支撑的 ELF 段中，启用前评审 kernel/bootstrap 调用约定、栈占用及实际指令。
 描述符或临时存储显式纳入链接/资源契约和审计，不将诊断区看似空白的位置直接当作空闲。
 
-设计中的代码职责分配为：`platforms/bes2700yp/resources/` 承载 BTH 客户端与仲裁，
-`platforms/bes2700yp/boot/bootstrap/` 承载常驻后端，
+设计中的代码职责分配为：`platforms/bes2700yp/resources/` 承载 BTH 客户端，
+`platforms/bes2700yp/boot/bootstrap/` 承载常驻后端与仲裁，
 `include/bestechnic/bes2700yp/` 定义项目公共契约。Zephyr 驱动及 binding 放在 `bsp/`，
 厂商实现保留在 HAL 生成仓，不向两个内核加入厂商私有头文件或另一份 HAL。
 M55 资源服务须有独立的 IPC 协议与权限契约。运行期契约和源码纳入固件构建输入，
