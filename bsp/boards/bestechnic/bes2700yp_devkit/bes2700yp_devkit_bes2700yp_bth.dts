@@ -1,11 +1,28 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /dts-v1/;
 #include <bestechnic/bes2700yp_bth.dtsi>
+#include <zephyr/dt-bindings/gpio/gpio.h>
 / {
 	model = "BES2700YP BTH V05 bring-up";
 	compatible = "bestechnic,bes2700yp-devkit";
 	chosen {
 		zephyr,flash = &bth_code;
 		zephyr,sram = &bth_data;
+	};
+};
+
+/* Board mappings only. Applications configure them after lifecycle launch. */
+/ {
+	aliases { sw0 = &key0; sw1 = &key1; led0 = &led_d2; };
+	buttons {
+		compatible = "gpio-keys";
+		status = "disabled";
+		key0: key-0 { gpios = <&aon_gpio 16 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; };
+		key1: key-1 { gpios = <&aon_gpio 17 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; };
+	};
+	leds {
+		compatible = "gpio-leds";
+		status = "disabled";
+		led_d2: led-0 { gpios = <&aon_gpio 12 GPIO_ACTIVE_LOW>; };
 	};
 };

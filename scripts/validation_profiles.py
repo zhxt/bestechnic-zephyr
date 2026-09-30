@@ -19,9 +19,12 @@ class ValidationProfile:
     recovery_fail_step: int = 0
     arbitration_probe: bool = False
     gpio_mode: int = 0
+    gpio_api: bool = False
 
 
 PROFILES = MappingProxyType({
+    'gpio-api-input': ValidationProfile(1, 600, 600, gpio_mode=1, gpio_api=True),
+    'gpio-api-led-restart': ValidationProfile(1, 600, 600, True, gpio_mode=2, gpio_api=True),
     'gpio-input': ValidationProfile(1, 600, 600, gpio_mode=1),
     'gpio-led': ValidationProfile(1, 600, 600, gpio_mode=2),
     'ipc-sequential': ValidationProfile(1, 600, 600),
@@ -116,4 +119,5 @@ def cmake_settings(name):
             + ('ON' if scenario.m55_restart else 'OFF') + ')\n'
             'set(BES_VALIDATION_ARBITRATION_PROBE '
             + ('ON' if scenario.arbitration_probe else 'OFF') + ')\n'
-            + f'set(BES_VALIDATION_GPIO_MODE {scenario.gpio_mode})\n')
+            + f'set(BES_VALIDATION_GPIO_MODE {scenario.gpio_mode})\n'
+            + 'set(BES_VALIDATION_GPIO_API ' + ('ON' if scenario.gpio_api else 'OFF') + ')\n')

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+config GPIO_BES2700YP
+	bool "BES2700YP GPIO through the BTH resource service"
+	default y
+	depends on GPIO && SOC_BES2700YP_BTH && !USERSPACE
+	depends on DT_HAS_BESTECHNIC_BES2700YP_GPIO_ENABLED
+	help
+	  Restricted polling GPIO: P2_0/P2_1 input pull-up and optional P1_4
+	  push-pull output. Calls require an IRQ-enabled privileged BTH thread.
+	  The boot service must already provide the GPIO capability. Device
+	  initialization only discovers it; applications configure pins after
+	  M55 launch. GPIO interrupts, hogs and init-time consumers are unsupported.

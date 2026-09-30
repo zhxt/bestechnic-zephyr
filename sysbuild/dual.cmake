@@ -30,6 +30,11 @@ set_property(CACHE BES_VALIDATION_PROFILE PROPERTY STRINGS ${BES_VALIDATION_PROF
 set(bth_DUAL_GENERATED_DIR ${BES_GENERATED} CACHE PATH "Generated M55 payload" FORCE)
 set(bth_EXTRA_CONF_FILE ${BES_GENERATED}/bth.conf CACHE STRING "BTH common profile" FORCE)
 set(m55_EXTRA_CONF_FILE ${BES_GENERATED}/m55.conf CACHE STRING "M55 common profile" FORCE)
+set(bth_EXTRA_DTC_OVERLAY_FILE "" CACHE STRING "BTH GPIO capability overlay" FORCE)
+if(BES_VALIDATION_GPIO_API)
+  set(bth_EXTRA_DTC_OVERLAY_FILE ${BES_ROOT}/apps/bes2700yp/bth/${BES_VALIDATION_PROFILE}.overlay
+    CACHE STRING "BTH GPIO capability overlay" FORCE)
+endif()
 ExternalZephyrProject_Add(APPLICATION m55 SOURCE_DIR ${BES_ROOT}/apps/bes2700yp/m55
   BOARD bes2700yp_devkit/bes2700yp/cm55)
 add_custom_target(m55_payload

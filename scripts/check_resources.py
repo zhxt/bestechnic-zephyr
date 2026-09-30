@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import struct
 import os
 from pathlib import Path
 import re
@@ -145,7 +146,14 @@ def audit(root, release, zephyr):
                            'CONFIG_SYS_CLOCK_TICKS_PER_SEC': '1000'}
         for key, value in expected_config.items():
             expect(core, None, config.get(key) == value, 'config-contract', key+' must be '+value)
-        for key in ('CONFIG_SERIAL', 'CONFIG_GPIO', 'CONFIG_PINCTRL', 'CONFIG_CLOCK_CONTROL',
+        native_gpio = config.get('CONFIG_GPIO_BES2700YP', 'n') == 'y'
+        expect(core, None, config.get('CONFIG_GPIO', 'n') == ('y' if native_gpio else 'n'),
+               'unreviewed-runtime-owner', 'GPIO API requires the reviewed BTH service driver')
+        if native_gpio:
+            expect(core, None, core == 'bth', 'gpio-owner', 'GPIO API belongs to BTH')
+            for key in ('CONFIG_GPIO_HOGS', 'CONFIG_LED_GPIO', 'CONFIG_INPUT_GPIO_KEYS'):
+                expect(core, None, config.get(key, 'n') == 'n', 'gpio-init-owner', key)
+        for key in ('CONFIG_SERIAL', 'CONFIG_PINCTRL', 'CONFIG_CLOCK_CONTROL',
                     'CONFIG_RESET', 'CONFIG_PM', 'CONFIG_PM_DEVICE', 'CONFIG_TICKLESS_KERNEL'):
             expect(core, None, config.get(key, 'n') == 'n', 'unreviewed-runtime-owner', key)
         gpio_mode = int(config.get('CONFIG_BES2700YP_GPIO_VALIDATION', '0'))
@@ -157,10 +165,14 @@ def audit(root, release, zephyr):
             paths.extend([manifest_path, layout_path])
             manifest = json.loads(manifest_path.read_text())
             layout = json.loads(layout_path.read_text())
-            wanted = {'gpio-input': 1, 'gpio-led': 2}.get(manifest.get('validation_profile'))
+            wanted = {'gpio-input': 1, 'gpio-led': 2, 'gpio-api-input': 1,
+                      'gpio-api-led-restart': 2}.get(manifest.get('validation_profile'))
+            wanted_api = manifest.get('validation_profile', '').startswith('gpio-api-')
             service = layout.get('gpio_service', {})
             expect(core, None, layout.get('validation_profile') == manifest.get('validation_profile')
                    and gpio_mode == wanted and service.get('mode') == gpio_mode
+                   and native_gpio == wanted_api
+                   and service.get('zephyr_api', False) is wanted_api
                    and service.get('capabilities') == (40 if gpio_mode == 1 else 56),
                    'gpio-profile', 'GPIO profile/config/ELF capabilities must match')
             report['gpio_qualification'] = dict(owner='BTH bootstrap service',
@@ -207,6 +219,9 @@ def audit(root, release, zephyr):
                    and int(config.get('CONFIG_'+key+'_SIZE', '-1'), 0)*1024 == size,
                    'config-memory', key+' differs from generated DTS')
 
+        expect(core, None, not native_gpio or gpio_mode in (1, 2),
+               'gpio-profile', 'GPIO API requires a pinned service capability')
+        gpio_nodes = []
         mailbox_nodes = []
         private_nodes = []
         for node in tree.node_iter():
@@ -242,6 +257,24 @@ def audit(root, release, zephyr):
                        and ('endpoint-bth' in node.props) == (core == 'bth')
                        and number(node, '#mbox-cells') == 1,
                        'mailbox-fields', 'only the reviewed channel-1 endpoint windows are shared')
+            elif 'bestechnic,bes2700yp-gpio' in compat:
+                gpio_nodes.append(node)
+                wanted_ranges = [0, 16] if gpio_mode == 1 else [0, 12, 13, 3]
+                ranges = node.props.get('gpio-reserved-ranges')
+                expect(core, node, native_gpio and core == 'bth'
+                       and regs == [(0x40081000, 0x1000)]
+                       and number(node, 'ngpios') == 18 and number(node, '#gpio-cells') == 2
+                       and 'gpio-controller' in node.props and ranges is not None
+                       and ranges.to_nums() == wanted_ranges
+                       and not any(k in node.props for k in ('interrupts', 'interrupts-extended',
+                                                           'clocks', 'resets', 'pinctrl-0')),
+                       'gpio-service-owner', 'GPIO range, pin grant and inherited resources')
+                for alias, pin, flags in [('sw0', 16, 17), ('sw1', 17, 17), ('led0', 12, 1)]:
+                    consumer = tree.alias2node.get(alias)
+                    prop = consumer.props.get('gpios') if consumer else None
+                    cells = struct.unpack('>3I', prop.value) if prop and len(prop.value) == 12 else ()
+                    expect(core, consumer, len(cells) == 3 and tree.phandle2node.get(cells[0]) is node
+                           and cells[1:] == (pin, flags), 'gpio-board-map', alias)
             elif memory:
                 expect(core, node, node.path in allowed_memory, 'unassigned-memory', 'memory owner is not declared')
             elif regs:
@@ -309,6 +342,8 @@ def audit(root, release, zephyr):
                                and 'bestechnic,bes2700-mbox' in strings(controller, 'compatible')
                                and cells[i+1] == policy['mailbox']['logical_channel'],
                                'mailbox-channel', 'only logical channel 0 (hardware channel 1) is granted')
+        expect(core, None, len(gpio_nodes) == int(native_gpio),
+               'gpio-count', 'one enabled GPIO service controller is required with the driver')
         expect(core, None, len(mailbox_nodes) == 1, 'mailbox-count', 'one enabled endpoint per core required')
         expect(core, None, nvic in private_nodes and any('systick' in c for n in private_nodes for c in strings(n, 'compatible')),
                'private-peripheral', 'NVIC and SysTick must remain enabled')

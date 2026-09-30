@@ -10,6 +10,7 @@ from analyze_dual_boot import prefix_contract
 from analyze_dual_message import FIELDS
 from validation_profiles import validate_manifest, layered
 import analyze_observation as observation
+import analyze_gpio_restart
 from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
 
 LIFECYCLE = dict(layout=0x000a0004, address=0x2015e280, bytes=128, rounds=11,
@@ -182,7 +183,8 @@ def analyze(text,manifest,scope='long'):
         validate_manifest(manifest, restart=True)
     except ValueError as error:
         return dict(status='fail', session_count=0, sessions=[], errors=[str(error)])
-    return observation.run(profile, text, manifest, Restart.analyze, scope)
+    return observation.finalize(analyze_gpio_restart.run(text, manifest,
+        lambda data, meta: observation.run(profile, data, meta, Restart.analyze, scope)))
 
 
 def main():

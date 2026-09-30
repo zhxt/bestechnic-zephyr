@@ -12,6 +12,15 @@
 		current-speed = <1152000>;
 		status = "disabled";
 	};
+	aon_gpio: gpio@40081000 {
+		compatible = "bestechnic,bes2700yp-gpio";
+		reg = <0x40081000 0x1000>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <18>;
+		gpio-reserved-ranges = <0 12>, <13 3>;
+		status = "disabled";
+	};
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;

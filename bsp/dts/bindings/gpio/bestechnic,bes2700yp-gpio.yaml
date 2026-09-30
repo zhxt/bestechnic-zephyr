@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+description: |
+  BES2700YP AON GPIO accessed through the privileged BTH resource service.
+  The inherited bank clock/reset are required; the driver does not manage
+  them or claim arbitrary pads. Pin numbers use bank * 8 + offset:
+  16/17 are P2_0/P2_1 input pull-up, 12 is optional P1_4 push-pull output.
+  Use gpio-reserved-ranges to exclude every other pin. Configuration is
+  deferred until M55 is running or held by the lifecycle service. IRQs,
+  GPIO hogs and automatic consumers configured during boot are unsupported.
+compatible: "bestechnic,bes2700yp-gpio"
+include: [base.yaml, gpio-controller.yaml]
+properties:
+  reg:
+    required: true
+  "#gpio-cells":
+    const: 2
+  ngpios:
+    const: 18
+  gpio-reserved-ranges:
+    required: true
+gpio-cells:
+  - pin
+  - flags

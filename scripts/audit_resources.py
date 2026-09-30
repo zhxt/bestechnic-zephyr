@@ -92,7 +92,7 @@ def check_gpio_irq_scope(rows, name):
             pending.append((rows[i+1][0], masked))
 
 
-def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False):
+def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False, gpio_api=False):
     prefix = 'bes_gpio' if gpio else 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
     descriptor = prefix + '_service'
     dispatch = prefix + '_dispatch'
@@ -204,17 +204,48 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
         if (not fault or sizes.get('gpio_fault') != 4 or
                 not syms.get('__bss_start__', 0) <= fault <= syms.get('__bss_end__', 0)-4):
             raise ValueError('GPIO fault latch is outside audited bootstrap BSS')
-        for name in ('bes_gpio_connect', 'bes_gpio_call', 'bes_gpio_descriptor_valid',
-                     'bes_gpio_validation_init', 'bes_gpio_validation_poll'):
+        consumers = ['bes_gpio_connect', 'bes_gpio_call', 'bes_gpio_descriptor_valid']
+        calls = {'bes_gpio_connect': ('dual_service_validate', 'bes_resource_descriptor_address_valid',
+                                     'bes_gpio_descriptor_valid')}
+        if gpio_api:
+            consumers += ['bes_gpio_api', 'gpio_bes_init', 'gpio_bes_pin_configure',
+                          'gpio_bes_port_get_raw', 'gpio_bes_port_set_masked_raw',
+                          'gpio_bes_port_set_bits_raw', 'gpio_bes_port_clear_bits_raw',
+                          'gpio_bes_port_toggle_bits', 'gpio_bes_pin_interrupt_configure']
+            calls.update(gpio_bes_init=('bes_gpio_connect',), gpio_bes_call=('bes_gpio_call',))
+            if not 0x20540000 <= bsyms.get('gpio_bes_data_0', 0) < 0x2055c000-96:
+                raise ValueError('GPIO driver request storage is outside BTH data RAM')
+            segments = parse_load_segments(run_readelf(bth))
+            bdata = bth.read_bytes()
+            config = bth.with_name('.config').read_text()
+            api_targets = ['gpio_bes_pin_configure']
+            if 'CONFIG_GPIO_GET_CONFIG=y\n' in config:
+                api_targets.append(None)
+            api_targets += ['gpio_bes_port_get_raw', 'gpio_bes_port_set_masked_raw',
+                            'gpio_bes_port_set_bits_raw', 'gpio_bes_port_clear_bits_raw',
+                            'gpio_bes_port_toggle_bits', 'gpio_bes_pin_interrupt_configure', None, None]
+            if 'CONFIG_GPIO_GET_DIRECTION=y\n' in config:
+                api_targets.append(None)
+            off = file_span(segments, bsyms['bes_gpio_api'], len(api_targets)*4)
+            actual = struct.unpack_from('<'+'I'*len(api_targets), bdata, off)
+            expected = tuple((bsyms[name] | 1) if name else 0 for name in api_targets)
+            if actual != expected:
+                raise ValueError('GPIO API table does not reference the reviewed callbacks')
+            off = file_span(segments, bsyms['gpio_bes_config_0'], 4)
+            if struct.unpack_from('<I', bdata, off)[0] != (0x31000 if words[3] == 56 else 0x30000):
+                raise ValueError('GPIO driver pin mask differs from the service grant')
+        else:
+            consumers += ['bes_gpio_validation_init', 'bes_gpio_validation_poll']
+            calls.update(bes_gpio_validation_init=('bes_gpio_connect', 'gpio_access'),
+                         gpio_access=('bes_gpio_call',))
+        for name in consumers:
             if name not in bsyms:
                 raise ValueError('missing BTH GPIO consumer: ' + name)
-        for caller, targets in {'bes_gpio_validation_init': ('bes_gpio_connect', 'gpio_access'),
-                'gpio_access': ('bes_gpio_call',),
-                'bes_gpio_connect': ('dual_service_validate', 'bes_resource_descriptor_address_valid',
-                                     'bes_gpio_descriptor_valid')}.items():
+        for caller, targets in calls.items():
             code = subprocess.check_output([cross+'objdump', '-d', '--disassemble='+caller, str(bth)], text=True)
             for target in targets:
-                if not re.search(r'\bbl(?:\.w)?\s+[0-9a-f]+ <'+target+r'>', code):
+                branch = r'\bb(?:l)?(?:\.w)?' if gpio_api else r'\bbl(?:\.w)?'
+                if not re.search(branch+r'\s+[0-9a-f]+ <'+target+r'>', code):
                     raise ValueError('GPIO client bypasses validation: ' + target)
         return dict(abi=words[1], capabilities=words[3], descriptor=address, dispatch=words[4],
                     request_bytes=words[5], snapshot_bytes=words[6], descriptor_bytes=32,
@@ -222,7 +253,7 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
                     reachable=sorted(seen), descriptor_read_only=True, integer_only=True,
                     bounded_call_graph=True, context='privileged BTH thread',
                     iomux_lock='AON MEMSC0 single attempt; sample requires no semaphore',
-                    hardware_irqs_enabled=True, fault_latch=fault)
+                    hardware_irqs_enabled=True, fault_latch=fault, zephyr_api=gpio_api)
     for name in ('resources_init', prefix + '_connect', prefix + '_read',
                  prefix + '_descriptor_valid', 'bes_resource_probe'):
         if name not in bsyms:

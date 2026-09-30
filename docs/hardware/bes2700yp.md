@@ -82,7 +82,8 @@ This table concerns this repository, regardless of upstream Zephyr subsystem ava
 | Audio | No ADC/DAC, I²S/TDM/SPDIF/DMIC, or ANC/EQ path |
 | Sensor Hub / BECO NPU | No startup, Zephyr target, or NPU runtime interface |
 | Flash read/write | HAL supports boot-time flash operations; no Zephyr flash driver or standard application interface |
-| GPIO, I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers |
+| GPIO | Optional restricted Zephyr GPIO driver: P2_0/P2_1 input pull-up, P1_4 output; thread context only, no IRQ |
+| I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers |
 | Security | No security-engine, TRNG, eFuse, or secure-boot validation; image CRC checks integrity only |
 
 ### Configuration and validation evidence
@@ -194,4 +195,4 @@ hardware validation.
 
 ## Restricted GPIO profiles
 
-The optional [GPIO qualification](../gpio.md) service polls P2_0/P2_1 and can drive P1_4. P1_5 and UART pads remain unchanged. It is disabled in ordinary profiles; there is no Zephyr GPIO/pinctrl controller or GPIO IRQ support. Actual-board wiring and electrical levels require confirmation.
+The optional [GPIO qualification](../gpio.md) service polls P2_0/P2_1 and can drive P1_4. P1_5 and UART pads remain unchanged. It is disabled in ordinary profiles. Standard API profiles register a restricted Zephyr GPIO controller backed by the same service; pinctrl and GPIO IRQ support are absent. Actual-board wiring and electrical levels require confirmation.

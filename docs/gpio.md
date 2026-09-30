@@ -2,7 +2,7 @@
 
 [简体中文](gpio.zh-CN.md)
 
-Two optional sysbuild profiles exercise a small BTH-owned GPIO path alongside
+The `gpio-input` and `gpio-led` sysbuild profiles exercise a small BTH-owned GPIO path alongside
 normal dual-core IPC. They use a bootstrap service backed by an original HAL
 facade. They do not register a Zephyr GPIO or pinctrl controller, configure GPIO
 interrupts, or transfer shared hardware ownership to M55.
@@ -120,3 +120,61 @@ calls and stack budget. Host tests exercise the actual service, client, interact
 and HAL mask operations, including negative and parser mutation cases. These
 checks supplement board testing and do not establish GPIO IRQ routing or a
 complete Zephyr GPIO driver.
+
+## Standard Zephyr GPIO API
+
+The `gpio-api-input` and `gpio-api-led-restart` profiles enable
+[the BTH GPIO driver](../bsp/drivers/gpio/gpio_bes2700yp.c) with
+[the service-backed controller binding](../bsp/dts/bindings/gpio/bestechnic,bes2700yp-gpio.yaml).
+The existing HAL and bootstrap service remain the hardware owner. The driver
+provides pin configuration, raw port input, masked output, set, clear and toggle.
+Zephyr handles logical active-low conversion; raw operations retain physical levels.
+
+| Pin | Supported configuration | API grant |
+|---|---|---|
+| P2_0 / 16, P2_1 / 17 | `GPIO_INPUT | GPIO_PULL_UP` | Both profiles; only the input profile configures the keys |
+| P1_4 / 12 | Push-pull output, optional initial high/low | Output profile only |
+| Other pins, including P1_5 and UART pads | Not granted | Reserved in DTS and rejected by the driver |
+
+Direction is restricted per pin. Pull-down, unbiased input, open-drain,
+disconnected mode, GPIO IRQs and M55 calls are unsupported. Device initialization
+only validates the service descriptor. The application must configure pins after
+M55 launch; `device_is_ready()` does not imply the lifecycle phase permits a write.
+GPIO hogs and automatic LED/input consumers configured during initialization are
+not supported. The board's disabled `gpio-keys` and `gpio-leds` nodes provide DT
+specifiers without enabling those consumers.
+
+Calls require a privileged BTH thread with PRIMASK and BASEPRI clear. ISR or
+interrupt-masked calls return `-EWOULDBLOCK` without hardware access. A per-device
+nonblocking semaphore serializes calls, including output-latch read and write for
+toggle. Contention also returns `-EWOULDBLOCK`; applications may retry later in a
+thread. No spinlock covers AON register access. Direct service writers must not be
+mixed with driver writers. Diagnostic read-only snapshots remain available.
+Configure pins from a single application context before concurrent data operations.
+
+Invalid pin/mask requests return `-EINVAL`; unsupported directions, flags and IRQ
+configuration return `-ENOTSUP`. Output writes before successful output configuration
+return `-EACCES`. Service errors propagate; fault-latched reads return `-EIO`.
+A failed port read leaves its output argument unchanged. GPIO clocks/reset must
+already be usable; the driver does not change clock gates, resets, voltage or pad
+drive strength. It has no separate pinctrl provider.
+
+Select the profile with `-DBES_VALIDATION_PROFILE=<name>` in the regular sysbuild command:
+
+- `gpio-api-input`: wait for `zephyr_gpio waiting`, perform ten press/release cycles
+  on each key, then wait for the post-functional 60-second short result. Pad samples
+  use `gpio_port_get_raw()` and setup uses `gpio_pin_configure_dt()`. Full service
+  snapshots are diagnostics once per second. Analyze with `analyze_dual_message.py`.
+- `gpio-api-led-restart`: no key operation is required. D2 is configured inactive
+  through `gpio_pin_configure_dt()`, toggled on during each of 11 M55 sessions, and
+  set inactive after each stop. Each transition checks actual pad level and configuration,
+  including retention before writing again. D3, key and UART configuration remain
+  unchanged. After 22 transitions D2 stays off; terminal checks continue each second.
+  Analyze with `analyze_dual_restart.py`. Flash only after the electrical checks above.
+
+Both analyzers require the matching release/layout.json and accept `--scope short`.
+The output profile emits `zephyr_gpio_api` baseline/checkpoint/observe records in
+addition to the complete lifecycle and observation protocol. A short pass requires
+all 11 sessions and the following 60 seconds; the observation window does not
+replace functional coverage. Longer execution is optional and separately reported.
+Physical power cycling, LED appearance and voltage remain external observations.

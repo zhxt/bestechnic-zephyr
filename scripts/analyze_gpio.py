@@ -18,14 +18,17 @@ FIELDS = {
 
 
 def run(text, manifest, core):
-    mode = get_profile(manifest['validation_profile']).gpio_mode
+    scenario = get_profile(manifest['validation_profile'])
+    mode = scenario.gpio_mode
     if not mode:
         return core(text, manifest)
     base, rows, errors, missing = [], [], [], []
     service = manifest.get('gpio_service', {})
     expected = dict(abi=4, mode=mode, capabilities=40 if mode == 1 else 56,
                     request_bytes=96, snapshot_bytes=64)
-    if any(type(service.get(k)) is not int or service[k] != v for k, v in expected.items()):
+    if scenario.gpio_api:
+        expected['zephyr_api'] = True
+    if any(type(service.get(k)) is not type(v) or service[k] != v for k, v in expected.items()):
         errors.append('GPIO layout service contract')
     for index, line in enumerate(text.splitlines()):
         if 'zephyr_gpio ' not in line:
@@ -39,7 +42,10 @@ def run(text, manifest, core):
         try:
             pairs = [item.split('=', 1) for item in body.split()]
             d = {key: int(value, 0) for key, value in pairs}
-            if (kind not in FIELDS or set(d) != FIELDS[kind] or len(d) != len(pairs)
+            wanted_fields = FIELDS.get(kind, set())
+            if kind == 'begin' and scenario.gpio_api:
+                wanted_fields = wanted_fields | {'api'}
+            if (kind not in FIELDS or set(d) != wanted_fields or len(d) != len(pairs)
                     or any(not 0 <= v <= 0xffffffff for v in d.values())):
                 raise ValueError()
         except ValueError:
@@ -62,8 +68,12 @@ def run(text, manifest, core):
         if row['level'] != 'I' or kind == 'error':
             errors.append('GPIO firmware error')
         if kind == 'begin':
-            if state or d != dict(version=2, build=int(manifest['build'], 0), mode=mode,
-                                  target=10, poll_ms=10, snapshot_ms=1000, debounce_ms=50, timeout_ms=300000):
+            wanted = dict(version=3 if scenario.gpio_api else 2, build=int(manifest['build'], 0),
+                          mode=mode, target=10, poll_ms=10, snapshot_ms=1000,
+                          debounce_ms=50, timeout_ms=300000)
+            if scenario.gpio_api:
+                wanted['api'] = 1
+            if state or d != wanted:
                 errors.append('GPIO begin identity/order')
             state = 1
         elif kind == 'snapshot':

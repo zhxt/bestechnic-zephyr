@@ -84,7 +84,8 @@ M55 故障隔离提供可选 `m55-ready-timeout` 和 `m55-heartbeat-stop` 场景
 | 音频 | 尚未接入 ADC/DAC、I²S/TDM/SPDIF/DMIC、ANC/EQ 等音频路径 |
 | Sensor Hub / BECO NPU | 尚未包含该子系统的启动、Zephyr 目标或 NPU 运行接口 |
 | Flash 读写 | HAL 支持启动所需的 Flash 操作；尚未提供 Zephyr Flash 驱动或应用可用的标准读写接口 |
-| GPIO、I²C、SPI、PWM、GPADC、DMA、看门狗 | 尚未提供对应的 BES2700YP Zephyr 驱动 |
+| GPIO | 可选受限 Zephyr GPIO 驱动：P2_0/P2_1 上拉输入、P1_4 输出；仅线程上下文，无 IRQ |
+| I²C、SPI、PWM、GPADC、DMA、看门狗 | 尚未提供对应的 BES2700YP Zephyr 驱动 |
 | 安全资源 | 尚未集成安全引擎、TRNG、eFuse 或安全启动验证；当前镜像 CRC 检查仅用于完整性校验 |
 
 ### 配置与验证依据
@@ -187,4 +188,4 @@ UART 交接需要发送排空、IRQ/状态所有权移交及唯一运行期写�
 
 ## 受限 GPIO 场景
 
-可选的 [GPIO 验证](../gpio.zh-CN.md)服务轮询 P2_0/P2_1，并可驱动 P1_4，保持 P1_5 和 UART 引脚原状。普通场景不启用；尚无 Zephyr GPIO/pinctrl 控制器和 GPIO 中断支持。实际板卡接线及电平需确认。
+可选的 [GPIO 验证](../gpio.zh-CN.md)服务轮询 P2_0/P2_1，并可驱动 P1_4，保持 P1_5 和 UART 引脚原状。普通场景不启用。标准 API 场景在相同服务上注册受限 Zephyr GPIO 控制器；未提供 pinctrl 和 GPIO 中断支持。实际板卡接线及电平需确认。

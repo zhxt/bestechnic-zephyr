@@ -94,7 +94,8 @@ def configure(a):
     common += f'CONFIG_BES2700_M55_RECOVERY_FAIL_STEP={scenario.recovery_fail_step}\n'
     write(a.generated / 'm55.conf', common)
     write(a.generated / 'bth.conf', common + f'CONFIG_DUAL_DURATION_SECONDS={identity["heartbeat"]}\n'
-          + f'CONFIG_BES2700YP_GPIO_VALIDATION={scenario.gpio_mode}\n')
+          + f'CONFIG_BES2700YP_GPIO_VALIDATION={scenario.gpio_mode}\n'
+          + ('CONFIG_GPIO=y\nCONFIG_GPIO_BES2700YP=y\n' if scenario.gpio_api else ''))
     write(a.generated / 'boot_profile_id.h',
           f'#define BOOT_PROFILE_ID 0x{identity["profile"]:08x}U\n#define BOOT_PROFILE_VARIANT 2U\n')
     # Keep ROM/programmer metadata and reserved-sector reporting compatible.
@@ -277,7 +278,8 @@ def final(a):
     layout['arbitration_service'] = report['arbitration_service']
     gpio_mode = get_profile(identity['validation_profile']).gpio_mode
     if gpio_mode:
-        report['gpio_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, gpio=True)
+        report['gpio_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, gpio=True,
+            gpio_api=get_profile(identity['validation_profile']).gpio_api)
         report['gpio_service']['mode'] = gpio_mode
         expected_cap = 56 if gpio_mode == 2 else 40
         if report['gpio_service']['capabilities'] != expected_cap:

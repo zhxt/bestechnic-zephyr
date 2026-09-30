@@ -2,7 +2,7 @@
 
 [English](gpio.md)
 
-两个可选 sysbuild 场景在正常双核 IPC 运行时验证一条由 BTH 管理的 GPIO 路径，
+`gpio-input` 和 `gpio-led` 两个 sysbuild 场景在正常双核 IPC 运行时验证一条由 BTH 管理的 GPIO 路径，
 通过 bootstrap 服务调用自有 HAL 接口。它们不注册 Zephyr GPIO/pinctrl 控制器，
 不配置 GPIO 中断，也不把共享硬件的管理权转移给 M55。
 
@@ -94,3 +94,49 @@ ELF 审计核对描述符/能力一致性、有限执行的
 纯整数 HAL 调用及栈预算。主机测试执行实际服务、客户端、交互应用、去抖和 HAL 掩码操作，
 覆盖拒绝路径及日志变异测试。这些检查补充实板验证，不证明 GPIO 中断路由或完整
 Zephyr GPIO 驱动已经实现。
+
+## 标准 Zephyr GPIO API
+
+`gpio-api-input` 与 `gpio-api-led-restart` 场景启用
+[BTH GPIO 驱动](../bsp/drivers/gpio/gpio_bes2700yp.c)及
+[基于服务的控制器 binding](../bsp/dts/bindings/gpio/bestechnic,bes2700yp-gpio.yaml)。
+现有 HAL 与 bootstrap 服务继续管理硬件。驱动提供引脚配置、端口原始输入、
+掩码输出、置位、清零及翻转；Zephyr 处理低有效逻辑转换，raw 操作保留物理电平语义。
+
+| 引脚 | 支持配置 | API 访问范围 |
+|---|---|---|
+| P2_0 / 16、P2_1 / 17 | `GPIO_INPUT | GPIO_PULL_UP` | 两个场景均提供；仅输入场景配置按键 |
+| P1_4 / 12 | 推挽输出，可指定初始高/低 | 仅输出场景 |
+| 其他引脚，包括 P1_5 及 UART 引脚 | 不开放 | DTS 保留，驱动拒绝访问 |
+
+方向按引脚限定。不支持下拉、无偏置输入、开漏、断开模式、GPIO IRQ 及 M55 调用。
+设备初始化仅验证服务描述符，应用在 M55 启动后配置引脚；`device_is_ready()`
+不表示当前生命周期阶段允许写操作。未支持 GPIO hog 及初始化期间自动配置的
+LED/输入消费者。板级禁用的 `gpio-keys`、`gpio-leds` 节点仅提供 DT specifier。
+
+调用要求特权 BTH 线程且 PRIMASK、BASEPRI 均为零。ISR 或屏蔽中断的上下文返回
+`-EWOULDBLOCK`，不访问硬件。每设备非阻塞信号量串行化调用，包括翻转时的输出
+锁存读写；争用也返回 `-EWOULDBLOCK`，应用可在线程中稍后重试。AON 访问不持有
+屏蔽中断的自旋锁。不能混用直接服务写操作和驱动写操作；只读诊断快照可以保留。
+应用应在同一上下文完成引脚配置，再并发执行数据操作。
+
+非法引脚/掩码返回 `-EINVAL`；不支持的方向、标志和 IRQ 配置返回 `-ENOTSUP`。
+尚未成功配置输出时，写入返回 `-EACCES`。服务错误向上传递，故障锁存后的读取返回
+`-EIO`；端口读取失败不修改输出参数。GPIO 时钟和复位须已处于可用状态，驱动
+不改门控、复位、电压或驱动强度，也不提供独立 pinctrl 控制器。
+
+在常规 sysbuild 命令中使用 `-DBES_VALIDATION_PROFILE=<名称>`：
+
+- `gpio-api-input`：看到 `zephyr_gpio waiting` 后操作两键，各完成十次按下/松开，
+  等待功能完成后的 60 秒 short 结果。通过 `gpio_pin_configure_dt()` 配置，
+  `gpio_port_get_raw()` 采样，每秒完整服务快照只用于诊断。用 `analyze_dual_message.py` 分析。
+- `gpio-api-led-restart`：无需按键。通过 `gpio_pin_configure_dt()` 将 D2 初始化为熄灭，
+  在 11 个 M55 会话中分别翻转为点亮、停止后设为熄灭。每次切换检查实际 pad 和
+  配置，写入前先检查跨重启保持，避免新写操作掩盖状态丢失。D3、按键及 UART
+  配置保持不变。22 次切换后 D2 保持熄灭，随后每秒继续检查。用
+  `analyze_dual_restart.py` 分析；上板输出前完成前述电气核对。
+
+两个分析器均要求匹配的 release/layout.json，支持 `--scope short`。输出场景在
+完整生命周期和观察协议之外记录 `zephyr_gpio_api` 的 baseline/checkpoint/observe。
+short 通过要求全部 11 个会话和功能后的 60 秒；观察窗口不替代功能步骤。
+更长运行另行登记。物理断电、LED 目视及电压仍需外部记录。

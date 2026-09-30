@@ -4,6 +4,27 @@
 #include "bth_contract.h"
 #include <bes2700yp_gpio.h>
 #include <bes2700yp_gpio_validation.h>
+#ifdef CONFIG_GPIO_BES2700YP
+#include <zephyr/drivers/gpio.h>
+static const struct gpio_dt_spec key_specs[] = {
+ GPIO_DT_SPEC_GET(DT_ALIAS(sw0), gpios), GPIO_DT_SPEC_GET(DT_ALIAS(sw1), gpios)
+};
+static int native_access(uint32_t op,uint32_t pin,struct bes_gpio_io *out)
+{
+ if(op==BES_GPIO_INPUT && (pin==16U || pin==17U)){
+  return gpio_pin_configure_dt(&key_specs[pin-16U],GPIO_INPUT);
+ }
+ if(op==BES_GPIO_SAMPLE){
+  gpio_port_value_t inputs;
+  int rc=gpio_port_get_raw(key_specs[0].port,&inputs);
+  if(!rc){out->snapshot.inputs=inputs;}
+  return rc;
+ }
+ /* Full service snapshots remain diagnostics, never a substitute for API IO. */
+ if(op==BES_GPIO_READ){return bes_gpio_call(op,0,0,out);}
+ return -ENOTSUP;
+}
+#endif
 #define MODE CONFIG_BES2700YP_GPIO_VALIDATION
 #define TARGET 10U
 #define LIMIT_MS 300000U
@@ -24,7 +45,13 @@ static void begin(const char *kind,int rc)
 static int __attribute__((noinline)) gpio_access(uint32_t op,uint32_t pin,uint32_t value,struct bes_gpio_io *out)
 {
  uint32_t before_mask=__get_PRIMASK(), before=bth_ticks();
+#ifdef CONFIG_GPIO_BES2700YP
+ (void)value;
+ int rc=native_access(op,pin,out);
+ if(rc==-EWOULDBLOCK){rc=-EBUSY;}
+#else
  int rc=bes_gpio_call(op,pin,value,out);
+#endif
  uint32_t elapsed=bth_ticks()-before, after_mask=__get_PRIMASK();
  unsigned kind=op==BES_GPIO_SAMPLE?0:op==BES_GPIO_READ?1:2;
  calls[kind]++;if(elapsed>max_ticks[kind]){max_ticks[kind]=elapsed;}
@@ -59,7 +86,7 @@ static int preserved(void)
  const struct bes_gpio_snapshot *s=&io.snapshot;
  uint32_t changed=BES_GPIO_KEYS|(MODE==2?BES_GPIO_LED:0);
  uint32_t led_mux=MODE==2?(15U<<16):0;
- return !s->fault && s->clocks==baseline.clocks && s->resets==baseline.resets &&
+ return s->phase==3 && !s->fault && s->clocks==baseline.clocks && s->resets==baseline.resets &&
   s->irq_enabled==baseline.irq_enabled && s->control==baseline.control &&
   !((s->mux_led^baseline.mux_led)&~led_mux) &&
   !((s->mux_keys^baseline.mux_keys)&~0xffU) &&
@@ -83,10 +110,20 @@ static void result(uint32_t ms,int rc)
 }
 int bes_gpio_validation_init(void)
 {
- begin("begin",0);field(" version=",2);bth_field(" build=",BTH_DIAG->build);
+ begin("begin",0);
+#ifdef CONFIG_GPIO_BES2700YP
+ field(" version=",3);field(" api=",1);
+#else
+ field(" version=",2);
+#endif
+ bth_field(" build=",BTH_DIAG->build);
  field(" mode=",MODE);field(" target=",TARGET);field(" poll_ms=",10);
  field(" snapshot_ms=",1000);field(" debounce_ms=",50);field(" timeout_ms=",LIMIT_MS);bth_end();
+#ifdef CONFIG_GPIO_BES2700YP
+ int rc=gpio_is_ready_dt(&key_specs[0]) && gpio_is_ready_dt(&key_specs[1])?0:-ENODEV;
+#else
  int rc=bes_gpio_connect();
+#endif
  if(!rc){rc=gpio_access(BES_GPIO_READ,0,0,&io);}
  if(rc){begin("error",rc);field(" stage=",0);field(" rc=",-rc);bth_end();return 97;}
  baseline=io.snapshot;snapshot(0);
@@ -94,6 +131,10 @@ int bes_gpio_validation_init(void)
  if(!rc){rc=gpio_access(BES_GPIO_INPUT,17,0,&io);}
  if(!rc && MODE==2){rc=gpio_access(BES_GPIO_OUTPUT,12,1,&io);led_claimed=!rc;}
  if(rc){begin("error",rc);field(" stage=",1);field(" rc=",-rc);bth_end();return 97;}
+#ifdef CONFIG_GPIO_BES2700YP
+ rc=gpio_access(BES_GPIO_READ,0,0,&io);
+ if(rc){return 97;}
+#endif
  snapshot(1);
  if(!preserved()){return 98;}
  start=k_uptime_get_32();next_snapshot=1000;
@@ -113,7 +154,9 @@ int bes_gpio_validation_poll(void)
  if(rc){error=99;}
  else {
   ms=k_uptime_get_32()-start;busy_since=0;samples++;
+#ifndef CONFIG_GPIO_BES2700YP
   if(sample_io.snapshot.fault || sample_io.snapshot.phase!=3){error=98;}
+#endif
   if(ms>=next_snapshot && !error){
    rc=gpio_access(BES_GPIO_READ,0,0,&io);
    if(rc){error=99;}else if(!preserved()){error=98;}

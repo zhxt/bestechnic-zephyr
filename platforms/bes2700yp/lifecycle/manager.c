@@ -12,6 +12,10 @@
 #include "bth_contract.h"
 #include "m55_payload.h"
 #include "message.h"
+#if CONFIG_BES2700YP_GPIO_VALIDATION == 2 && defined(CONFIG_GPIO_BES2700YP)
+#define GPIO_RESTART_PROBE 1
+#include <bes2700yp_gpio_restart.h>
+#endif
 _Static_assert(BES_PEER_READY_MS==BES_LIFECYCLE_READY_MS,"READY budget contract");
 static const struct device *const mailbox=DEVICE_DT_GET(DT_NODELABEL(mbox_peer));
 static int (*service)(uint32_t,uint32_t);
@@ -121,6 +125,14 @@ static void monitor(void *a,void *b,void *c)
   bool functional=observation.functional;
   unsigned scope=bes_observation_due(&observation,ms);
   k_mutex_unlock(&log_lock);
+#ifdef GPIO_RESTART_PROBE
+  if(functional) {
+   k_mutex_lock(&log_lock,K_FOREVER);
+   rc=bes_gpio_restart_observe(i);
+   k_mutex_unlock(&log_lock);
+   if(rc) { monitor_error=46;break; }
+  }
+#endif
   if(!functional && ms>=BES_OBSERVATION_LONG_MS) { monitor_error=31;break; }
   if(scope) {
    rc=observe_checkpoint(scope,ms);
@@ -264,6 +276,12 @@ static int session_finish(unsigned round,uint32_t start)
  begin("ready",0);field(" round=",round);field(" session=",generation);
  field(" peer_ms=",peer.ms);field(" beat=",peer.beat);field(" stack=",peer.stack);
  field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
+#ifdef GPIO_RESTART_PROBE
+ k_mutex_lock(&log_lock,K_FOREVER);
+ int gpio_rc=bes_gpio_restart_checkpoint(round,0);
+ k_mutex_unlock(&log_lock);
+ if(gpio_rc) { return 46; }
+#endif
  q_start();deadline=k_uptime_get()+BES_LIFECYCLE_MESSAGE_MS;
  struct q_report r={0};struct bes_peer_progress progress;
  bes_peer_progress_init(&progress,k_uptime_get());uint32_t base_ms=peer.ms;
@@ -317,6 +335,12 @@ static int session_finish(unsigned round,uint32_t start)
  field(" ram_sel0=",DUAL_HW->ram_sel0);field(" ram_sel1=",DUAL_HW->ram_sel1);
  field(" core_vtor=",DUAL_HW->core_vtor);field(" rc=",0);end();
  if(bes2700_mbox_reset(mailbox)) { return 22; }
+#ifdef GPIO_RESTART_PROBE
+ k_mutex_lock(&log_lock,K_FOREVER);
+ gpio_rc=bes_gpio_restart_checkpoint(round,1);
+ k_mutex_unlock(&log_lock);
+ if(gpio_rc) { return 46; }
+#endif
  event(round,8,0,k_uptime_get_32()-start);
  begin("session",0);field(" round=",round);field(" session=",generation);
  field(" elapsed=",k_uptime_get_32()-start);field(" reset_held=",1);
@@ -570,6 +594,9 @@ int bes2700_lifecycle_validate(void)
   rc=observe_terminal(rc,0,0);
 #endif
  }
+#ifdef GPIO_RESTART_PROBE
+ bes_gpio_restart_end();
+#endif
  k_timer_stop(&timer);k_thread_abort(lifecycle_monitor);q_stop();
  if(rc && service) {
   /* Preserve failure evidence before the final attempt to hold CPU reset. */
