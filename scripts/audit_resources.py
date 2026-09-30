@@ -52,13 +52,53 @@ def check_control_flow(rows, name):
         visit(rows[0][0])
 
 
+def check_gpio_irq_scope(rows, name):
+    """Prove the supported GPIO call sites cannot run under local CPSID.
+
+    GPIO dispatch rejects IRQ-masked entry. Its final MSR restores that zero
+    entry mask; the only nested mask manipulation is RAM arbitration bookkeeping.
+    HAL callees must not mask interrupts themselves.
+    """
+    if name.startswith('bes2700yp_gpio') or name == 'gpio_masked':
+        if any(op.split('.')[0] in ('cpsid', 'msr') for _, op, _ in rows):
+            raise ValueError('GPIO HAL changes interrupt masking: ' + name)
+    if name != 'bes_gpio_dispatch' or not rows:
+        return
+    by_pc = {pc: i for i, (pc, _, _) in enumerate(rows)}
+    pending, seen = [(rows[0][0], False)], set()
+    while pending:
+        pc, masked = pending.pop()
+        if (pc, masked) in seen or pc not in by_pc:
+            continue
+        seen.add((pc, masked))
+        i = by_pc[pc]
+        _, mnemonic, operands = rows[i]
+        op = mnemonic.split('.')[0]
+        if op == 'cpsid':
+            masked = True
+        elif op == 'cpsie' or (op == 'msr' and 'PRIMASK' in operands.upper()):
+            masked = False
+        destination = re.search(r'([0-9a-f]+) <([^>]+)>', operands)
+        if destination:
+            target = destination[2].split('+')[0]
+            if 'bes2700yp_gpio_' in target and masked:
+                raise ValueError('GPIO hardware call under PRIMASK')
+            if (op not in ('bl', 'blx') and
+                    (op.startswith('b') or op in ('cbz', 'cbnz')) and target == name):
+                pending.append((int(destination[1], 16), masked))
+        terminal = (op in ('b', 'bx') or (op in ('pop', 'ldmia') and 'pc' in operands) or
+                    (op.startswith('ldr') and operands.startswith('pc,')))
+        if not terminal and i+1 < len(rows):
+            pending.append((rows[i+1][0], masked))
+
+
 def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False):
     prefix = 'bes_gpio' if gpio else 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
     descriptor = prefix + '_service'
     dispatch = prefix + '_dispatch'
     allowed = ALLOWED | {dispatch} | ({'bes2700yp_uart0_read'} if uart else set())
     if gpio:
-        allowed |= {'bes2700yp_gpio_access', 'gpio_masked', 'bes_arbitration_enter', 'bes_arbitration_leave'}
+        allowed |= {'bes2700yp_gpio_access', 'bes2700yp_gpio_sample', 'gpio_masked', 'bes_arbitration_enter', 'bes_arbitration_leave'}
     library = generated / 'resource_validator.so'
     subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'include/bestechnic/bes2700yp'),
@@ -116,6 +156,8 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
         if not rows:
             raise ValueError('missing resource disassembly: ' + name)
         check_control_flow(rows, name)
+        if gpio:
+            check_gpio_irq_scope(rows, name)
         own, children = 0, []
         for pc, mnemonic, operands in rows:
             op = mnemonic.split('.')[0]
@@ -166,7 +208,8 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
                      'bes_gpio_validation_init', 'bes_gpio_validation_poll'):
             if name not in bsyms:
                 raise ValueError('missing BTH GPIO consumer: ' + name)
-        for caller, targets in {'bes_gpio_validation_init': ('bes_gpio_connect', 'bes_gpio_call'),
+        for caller, targets in {'bes_gpio_validation_init': ('bes_gpio_connect', 'gpio_access'),
+                'gpio_access': ('bes_gpio_call',),
                 'bes_gpio_connect': ('dual_service_validate', 'bes_resource_descriptor_address_valid',
                                      'bes_gpio_descriptor_valid')}.items():
             code = subprocess.check_output([cross+'objdump', '-d', '--disassemble='+caller, str(bth)], text=True)
@@ -178,7 +221,8 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
                     buffer=[0x20540000, 0x2055c000], stack_bound_bytes=stack,
                     reachable=sorted(seen), descriptor_read_only=True, integer_only=True,
                     bounded_call_graph=True, context='privileged BTH thread',
-                    iomux_lock='AON MEMSC0 single attempt', fault_latch=fault)
+                    iomux_lock='AON MEMSC0 single attempt; sample requires no semaphore',
+                    hardware_irqs_enabled=True, fault_latch=fault)
     for name in ('resources_init', prefix + '_connect', prefix + '_read',
                  prefix + '_descriptor_valid', 'bes_resource_probe'):
         if name not in bsyms:

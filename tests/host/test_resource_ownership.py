@@ -124,11 +124,11 @@ class ResourceOwnership(unittest.TestCase):
         original = config.read_text()
         config.write_text(original+'CONFIG_BES2700YP_GPIO_VALIDATION=1\n')
         manifest = self.release / 'manifest.json'
-        data = dict(validation_profile='gpio-input', gpio_service=dict(mode=1, capabilities=8))
+        data = dict(validation_profile='gpio-input', gpio_service=dict(mode=1, capabilities=40))
         manifest.write_text(json.dumps(data))
         (self.release / 'layout.json').write_text(json.dumps(data))
         self.assertEqual(self.check()['gpio_qualification']['outputs'], [])
-        data['gpio_service']['capabilities'] = 24
+        data['gpio_service']['capabilities'] = 56
         manifest.write_text(json.dumps(data))
         (self.release / 'layout.json').write_text(json.dumps(data))
         self.check('gpio-profile')

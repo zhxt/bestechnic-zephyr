@@ -18,6 +18,7 @@ static inline int bes_gpio_button_update(struct bes_gpio_button *b,uint32_t leve
 int bes_gpio_validation_init(void);
 int bes_gpio_validation_poll(void);
 int bes_gpio_validation_done(void);
-void bes_gpio_validation_functional(void);
+int bes_gpio_validation_functional(void);
+void bes_gpio_validation_timing(uint32_t sample,uint32_t rc);
 void bes_gpio_validation_end(void);
 #endif

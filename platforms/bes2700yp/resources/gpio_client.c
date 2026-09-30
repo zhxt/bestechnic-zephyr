@@ -33,5 +33,9 @@ int bes_gpio_call(uint32_t op,uint32_t pin,uint32_t value,struct bes_gpio_io *io
     s->pins!=BES_GPIO_PINS || ((s->inputs|s->directions|s->outputs)&~BES_GPIO_PINS)){
   return -EIO;
  }
+ if(op==BES_GPIO_SAMPLE && (s->directions || s->outputs || s->mux_led || s->mux_keys ||
+    s->pull_up || s->pull_down || s->clocks || s->resets || s->irq_enabled || s->control)){
+  return -EIO;
+ }
  return 0;
 }

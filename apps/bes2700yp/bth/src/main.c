@@ -214,6 +214,8 @@ int main(void)
     if(grc){finish(i,grc);return 0;}
     k_sleep(K_MSEC(10));
    }
+   int grc=bes_gpio_validation_poll();
+   if(grc){finish(i,grc);return 0;}
 #else
    k_sleep(K_TIMEOUT_ABS_MS((uint64_t)start_ms+i*1000));
 #endif
@@ -242,6 +244,9 @@ int main(void)
   field(" cycles_hi=",peer_cycles>>32);field(" cycles_lo=",peer_cycles);
   field(" bth_stack=",stack);field(" m55_stack=",peer.stack);
   field(" guards=",bth_guards_ok() && peer.guard==DUAL_GUARD);field(" rc=",rc);bth_end();
+#if CONFIG_BES2700YP_GPIO_VALIDATION
+  bes_gpio_validation_timing(i,rc);
+#endif
   struct q_report db;q_snapshot(&db);
   if(i && i%10==0 && i<CONFIG_DUAL_IPC_SECONDS && CONFIG_DUAL_MSG_MODE==2) {
    const struct q_state *lanes[2]={&db.bth,&db.m55};
@@ -282,7 +287,8 @@ int main(void)
 #endif
   ) {
 #if CONFIG_BES2700YP_GPIO_VALIDATION
-    bes_gpio_validation_functional();
+    int grc=bes_gpio_validation_functional();
+    if(grc){finish(i+1,grc);return 0;}
 #endif
     observation.functional_ms=k_uptime_get_32()-start_ms;observation.functional=true;
     observe_begin("functional",0);field(" version=",BES_OBSERVATION_VERSION);

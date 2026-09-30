@@ -5,11 +5,13 @@
 #define BES_GPIO_ABI 4U
 #define BES_GPIO_CAP 8U
 #define BES_GPIO_OUTPUT_CAP 16U
+#define BES_GPIO_SAMPLE_CAP 32U
 #define BES_GPIO_ID 4U
 #define BES_GPIO_READ 1U
 #define BES_GPIO_INPUT 2U
 #define BES_GPIO_OUTPUT 3U
 #define BES_GPIO_WRITE 4U
+#define BES_GPIO_SAMPLE 5U
 #define BES_GPIO_KEYS (3U << 16)
 #define BES_GPIO_LED (1U << 12)
 #define BES_GPIO_PINS (BES_GPIO_KEYS | (3U << 12))
@@ -17,6 +19,9 @@
 /* Fixed board qualification service, not a general GPIO controller.
  * BTH privileged threads only. Masks use bank*8+pin. P2_0/1 input pull-up;
  * optional P1_4 push-pull, P1_5 read-only. No voltage, drive or IRQ changes.
+ * All calls hold a BTH transaction guard; hardware access runs IRQ-enabled.
+ * SAMPLE returns only the header, pins and inputs; remaining fields are zero.
+ * Capability SAMPLE is required, rejecting older IRQ-masking services.
  * Configure only in active/stopped M55 phases 3/4. Snapshot includes complete
  * mux/pull fields for non-target preservation; inputs/direction/data are masked.
  * Wire errors: -1 invalid, -2 unsupported, -3 context, -4 busy,

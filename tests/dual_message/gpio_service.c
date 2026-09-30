@@ -8,7 +8,8 @@
 #define BES_RESOURCE_HOST_TEST
 static uint32_t ipsr, control, mask, phase=3;
 static unsigned calls;
-static int hw_error;
+static int hw_error, preempt;
+static void simulate_preemption(void);
 static uint32_t __get_IPSR(void) { return ipsr; }
 static uint32_t __get_CONTROL(void) { return control; }
 static uint32_t __get_PRIMASK(void) { return mask; }
@@ -18,12 +19,29 @@ static void __set_PRIMASK(uint32_t v) { mask=v; }
 uint32_t dual_service_phase(void) { return phase; }
 int bes2700yp_gpio_access(uint32_t op,uint32_t pin,uint32_t value,struct bes2700yp_gpio_state *s)
 {
- assert(mask==1);assert(op==1 || pin==16 || pin==17 || pin==12);assert(value<=1);calls++;
+ assert(mask==0);simulate_preemption();assert(op==1 || pin==16 || pin==17 || pin==12);assert(value<=1);calls++;
  *s=(struct bes2700yp_gpio_state){.pins=0x33000,.inputs=0x33000};return hw_error;
+}
+int bes2700yp_gpio_sample(uint32_t *inputs)
+{
+ assert(!mask);simulate_preemption();calls++;*inputs=0x33000;return hw_error;
 }
 #include "../../platforms/bes2700yp/boot/bootstrap/arbitration.c"
 #include "../../platforms/bes2700yp/boot/bootstrap/gpio_service.c"
 #include <bes2700yp_gpio_validation.h>
+static void simulate_preemption(void)
+{
+ assert(bes_arbitration_busy());
+ if(preempt){
+  uint32_t owner=bes_arbitration_busy();
+  assert(bes_gpio_dispatch(BES_GPIO_READ,BES_RESOURCE_RAM_START,96)==-4);
+  assert(bes_arbitration_enter(DUAL_STOP,phase)==BES_ARBITRATION_BUSY);
+  assert(bes_arbitration_state.pending && bes_arbitration_busy()==owner && !mask);
+  ipsr=15;
+  assert(bes_gpio_dispatch(BES_GPIO_READ,BES_RESOURCE_RAM_START,96)==-3);
+  ipsr=0;
+ }
+}
 static struct bes_gpio_io *io=(void *)BES_RESOURCE_RAM_START;
 static void reset(void)
 {
@@ -41,6 +59,12 @@ int main(void)
  assert(mmap(io,BES_RESOURCE_RAM_END-BES_RESOURCE_RAM_START,PROT_READ|PROT_WRITE,
    MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==io);
  reset();assert(!call(1));assert(calls==1 && !mask && io->snapshot.pins==0x33000);
+ reset();preempt=1;assert(!call(1) && calls==1 && !mask && !bes_arbitration_busy());
+ reset();assert(!call(5) && calls==1 && io->snapshot.inputs==0x33000);
+ assert(!io->snapshot.clocks && !io->snapshot.outputs && !io->snapshot.mux_keys);
+ assert(bes_arbitration_state.entered==bes_arbitration_state.exited);
+ preempt=0;
+ reset();io->pin=16;rejected(5,-1);
  reset();ipsr=1;rejected(1,-3);ipsr=0;control=1;rejected(1,-3);control=0;
  mask=1;rejected(1,-3);mask=0;rejected(0,-2);
  assert(bes_gpio_dispatch(1,BES_RESOURCE_RAM_END-92,96)==-1 && !calls);

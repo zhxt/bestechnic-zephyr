@@ -279,7 +279,7 @@ def final(a):
     if gpio_mode:
         report['gpio_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, gpio=True)
         report['gpio_service']['mode'] = gpio_mode
-        expected_cap = 24 if gpio_mode == 2 else 8
+        expected_cap = 56 if gpio_mode == 2 else 40
         if report['gpio_service']['capabilities'] != expected_cap:
             raise ValueError('GPIO build capability differs from profile')
         layout['gpio_service'] = report['gpio_service']

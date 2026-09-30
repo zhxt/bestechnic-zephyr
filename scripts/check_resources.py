@@ -161,7 +161,7 @@ def audit(root, release, zephyr):
             service = layout.get('gpio_service', {})
             expect(core, None, layout.get('validation_profile') == manifest.get('validation_profile')
                    and gpio_mode == wanted and service.get('mode') == gpio_mode
-                   and service.get('capabilities') == (8 if gpio_mode == 1 else 24),
+                   and service.get('capabilities') == (40 if gpio_mode == 1 else 56),
                    'gpio-profile', 'GPIO profile/config/ELF capabilities must match')
             report['gpio_qualification'] = dict(owner='BTH bootstrap service',
                 inputs=['P2_0', 'P2_1'], outputs=['P1_4'] if gpio_mode == 2 else [],

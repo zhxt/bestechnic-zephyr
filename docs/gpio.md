@@ -68,7 +68,7 @@ incomplete user exercise, not by itself evidence of faulty GPIO hardware.
 ## Interface and ownership
 
 Discovery operation 9 with argument 4 returns a 32-byte descriptor with ABI 4,
-capability 8 (input/read) or 24 (input/read and output). Existing service ABIs
+capability 40 (input/read/sample) or 56 (input/read/sample and output). Existing service ABIs
 retain their meanings. The [contract](../include/bestechnic/bes2700yp/bes2700yp_gpio.h)
 uses a 96-byte request containing a 64-byte snapshot. The snapshot contains
 phase, latched fault, candidate pad levels/direction/latches, full P1/P2 mux and
@@ -80,13 +80,17 @@ pull registers, AON clock/reset status, and GPIO IRQ/control state.
 | 2 input | pin=16 or 17, value=0 | Same |
 | 3 output | pin=12, value=0 or 1; output profile only | Same |
 | 4 write | pin=12 already configured as output, value=0 or 1 | Same |
+| 5 sample | pin=0, value=0; header, pins and inputs only; other fields zero | Same |
 
-Calls require a privileged BTH thread with interrupts initially enabled. Writes
-hold the lifecycle arbitration guard, mask local interrupts, recheck phase
-(live or isolated), then try AON MEMSC0 once. Busy returns without waiting.
-Read calls use the same short interrupt exclusion and hardware semaphore; they
-do not increment lifecycle write counters. M55, ISR, unprivileged and already
-IRQ-masked calls are outside the API contract.
+Calls require a privileged BTH thread with interrupts enabled. Every call holds
+lifecycle arbitration ownership across preemption; only RAM guard bookkeeping
+briefly masks interrupts. Hardware access runs with interrupts enabled. Writes
+recheck phase (live or isolated); full reads and writes try AON MEMSC0 once and
+return busy without waiting. Sampling checks bank availability and reads pad
+levels without MEMSC0 or configuration registers. No ISR may acquire MEMSC0 or
+call vendor IOMUX setters. M55, ISR, unprivileged and IRQ-masked callers are
+outside the API contract. Capability bit 32 identifies this sampling contract;
+clients reject older descriptors that lack it.
 
 The bank must already be clocked and out of reset. The service never resets the
 bank, changes its gates, enables an interrupt, or modifies pin voltage. Input
@@ -97,9 +101,22 @@ Readback failure leaves that pin as input and latches a service fault; further
 writes fail until reboot, while readback remains available. This is containment,
 not transactional restoration of earlier pin configuration.
 
-The application compares non-target register fields with its initial snapshot.
+The application samples inputs every 10 ms and compares full snapshots with its
+initial state once per second and after configuration/output operations. The
+first LED transition is due after one second; both keys remain interactive until
+ten complete cycles each, with a five-minute interaction deadline. Existing
+kernel/fast-timer health thresholds are unchanged.
+
+Version 2 `zephyr_gpio timing` records accompany health sample 1 and every tenth
+sample, and health failures. They report sample/read/write call counts, maximum
+call time in independent fast-timer ticks, entry/exit mask violations, and
+SysTick LOAD/VAL/pending state. Call time includes preemption and is not an
+IRQ-disabled duration. Diagnostics never read SysTick CTRL/COUNTFLAG, which would
+disturb kernel timekeeping. The analyzer requires these records and rejects mask
+violations, missing samples and excessive full-snapshot polling.
+
 ELF audits check descriptor/capability consistency, bounded integer-only HAL
-calls and stack budget. Host tests exercise the actual service, client, debounce
+calls and stack budget. Host tests exercise the actual service, client, interactive application, debounce
 and HAL mask operations, including negative and parser mutation cases. These
 checks supplement board testing and do not establish GPIO IRQ routing or a
 complete Zephyr GPIO driver.

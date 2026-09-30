@@ -6,13 +6,14 @@ from validation_profiles import get_profile
 ROW = re.compile(r'(\d+)/([IE])/BTH/GPIO/MAIN \| zephyr_gpio (\w+) (.+) !')
 SNAPSHOT = set('stage phase fault pins inputs directions outputs mux_led mux_keys pull_up pull_down clocks resets irq_enabled control'.split())
 FIELDS = {
-    'begin': set('version build mode target poll_ms debounce_ms timeout_ms'.split()),
+    'begin': set('version build mode target poll_ms snapshot_ms debounce_ms timeout_ms'.split()),
     'snapshot': SNAPSHOT,
     'waiting': {'pins', 'cycles_each'},
     'key': set('pin ms level presses releases'.split()),
     'led': set('ms step pin level'.split()),
     'result': set('version mode pass ms samples p0 r0 p1 r1 led_steps pad_checks busy rc'.split()),
     'error': {'stage', 'rc'},
+    'timing': set('version sample ms calls sample_calls read_calls write_calls max_ticks sample_max_ticks read_max_ticks write_max_ticks mask_errors systick_load systick_val systick_pending rc'.split()),
 }
 
 
@@ -22,7 +23,7 @@ def run(text, manifest, core):
         return core(text, manifest)
     base, rows, errors, missing = [], [], [], []
     service = manifest.get('gpio_service', {})
-    expected = dict(abi=4, mode=mode, capabilities=8 if mode == 1 else 24,
+    expected = dict(abi=4, mode=mode, capabilities=40 if mode == 1 else 56,
                     request_bytes=96, snapshot_bytes=64)
     if any(type(service.get(k)) is not int or service[k] != v for k, v in expected.items()):
         errors.append('GPIO layout service contract')
@@ -50,13 +51,19 @@ def run(text, manifest, core):
         return result
     s = result['sessions'][0]
     state, snapshots, keys, led, final, origin = 0, {}, {}, 0, False, None
+    timing = {}
+    samples = {}
+    for i, line in enumerate(text.splitlines()):
+        match = re.match(r'(\d+)/I/BTH/KERN/MAIN \| zephyr_dual sample id=(\d+) ', line)
+        if match:
+            samples[int(match[2])] = (i, int(match[1]))
     for row in rows:
         d, kind, time = row['fields'], row['kind'], row['time']
         if row['level'] != 'I' or kind == 'error':
             errors.append('GPIO firmware error')
         if kind == 'begin':
-            if state or d != dict(version=1, build=int(manifest['build'], 0), mode=mode,
-                                  target=10, poll_ms=10, debounce_ms=50, timeout_ms=300000):
+            if state or d != dict(version=2, build=int(manifest['build'], 0), mode=mode,
+                                  target=10, poll_ms=10, snapshot_ms=1000, debounce_ms=50, timeout_ms=300000):
                 errors.append('GPIO begin identity/order')
             state = 1
         elif kind == 'snapshot':
@@ -121,6 +128,27 @@ def run(text, manifest, core):
                 if d['presses'] != presses or d['releases'] != releases:
                     errors.append('GPIO key cycle accounting')
                 keys[pin] = d
+        elif kind == 'timing':
+            ident = d['sample']
+            previous = timing[max(timing)] if timing else None
+            maxima = ('sample_max_ticks', 'read_max_ticks', 'write_max_ticks')
+            counts = ('sample_calls', 'read_calls', 'write_calls')
+            if (state not in (4, 5) or d['version'] != 2 or ident in timing
+                    or ident not in samples or (ident != 1 and ident % 10)
+                    or (timing and ident <= max(timing)) or d['rc'] or d['mask_errors']
+                    or d['systick_load'] != 23999 or d['systick_val'] > d['systick_load']
+                    or d['systick_pending'] > 1 or not all(d[k] for k in maxima+counts)
+                    or d['max_ticks'] != max(d[k] for k in maxima)
+                    or d['calls'] != sum(d[k] for k in counts)
+                    or d['read_calls'] > d['ms']//1000+4
+                    or d['read_calls'] < max(1, d['ms']//1100-2)
+                    or d['write_calls'] < 2 or origin is None
+                    or abs(time-origin-d['ms']) > 100
+                    or (ident in samples and not (samples[ident][0] < row['index']
+                            and 0 <= time-samples[ident][1] <= 100))
+                    or (previous and any(d[k] < previous[k] for k in counts+maxima))):
+                errors.append('GPIO timing/cadence/interrupt diagnostics')
+            timing[ident] = d
         elif kind == 'result':
             if state != 5 or final or origin is None or abs(time-origin-d['ms']) > 100:
                 errors.append('GPIO result order/time')
@@ -132,7 +160,7 @@ def run(text, manifest, core):
                 if (key.get('level') != 1 or key.get('releases', 0) < 10
                         or key.get('presses') != d['p'+str(i)] or key.get('releases') != d['r'+str(i)]):
                     errors.append('GPIO insufficient key cycles')
-            if (d['version'] != 1 or d['mode'] != mode or d['pass'] != 1 or d['rc']
+            if (d['version'] != 2 or d['mode'] != mode or d['pass'] != 1 or d['rc']
                     or d['samples'] < 50 or d['samples'] > d['ms']//10+1
                     or not 50 <= d['ms'] < 590000 or d['led_steps'] != led
                     or (mode == 1 and d['pad_checks'])
@@ -140,6 +168,9 @@ def run(text, manifest, core):
                 errors.append('GPIO result/counter coverage')
         elif kind != 'error':
             errors.append('unknown GPIO event')
+    expected_timing = {i for i in samples if i == 1 or (i and i % 10 == 0)}
+    if set(timing) != expected_timing:
+        missing.append('GPIO timing diagnostics')
     if not final or set(snapshots) != {0, 1, 2}:
         missing.append('GPIO begin/configuration/events/result')
     s['errors'] += errors

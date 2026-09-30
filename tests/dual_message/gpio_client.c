@@ -15,7 +15,7 @@ static int32_t discover(uint32_t op, uint32_t abi)
 { assert(op==9 && abi==4); calls++;return (int32_t)returned; }
 static int32_t dispatch(uint32_t op, uint32_t address, uint32_t bytes)
 {
- assert(op==1 && bytes==96 && address==BES_RESOURCE_RAM_START);calls++;
+ assert((op==1 || op==5) && bytes==96 && address==BES_RESOURCE_RAM_START);calls++;
  struct bes_gpio_io *io=(void *)(uintptr_t)address;
  assert(io->abi==4 && io->bytes==96 && io->resource==4 && !io->pin && !io->value);
  for(unsigned i=0;i<3;i++) assert(!io->reserved[i]);
@@ -29,6 +29,7 @@ static int32_t dispatch(uint32_t op, uint32_t address, uint32_t bytes)
  case 6:io->snapshot.inputs=1;break;
  case 7:io->snapshot.directions=1;break;
  case 8:io->snapshot.outputs=1;break;
+ case 9:io->snapshot.clocks=0x4002;break;
  }
  return response;
 }
@@ -52,7 +53,7 @@ int main(void)
  *root=(struct dual_service){.magic=DUAL_SERVICE_MAGIC,.layout=DUAL_LAYOUT,.dispatch=0x14000001,
  .itcm=DUAL_ITCM,.itcm_size=0x40000,.dtcm=DUAL_DTCM,.dtcm_size=0xa0000,.mailbox=DUAL_MAILBOX};
  struct bes_gpio_io *io=map(BES_RESOURCE_RAM_START);
- *d=(struct bes_resource_descriptor){BES_RESOURCE_MAGIC,4,32,8,0x14000021,96,64,0};
+ *d=(struct bes_resource_descriptor){BES_RESOURCE_MAGIC,4,32,40,0x14000021,96,64,0};
  assert(bes_gpio_call(1,0,0,io)==-ENODEV && !calls);
  root->magic=0;assert(bes_gpio_connect()==-ENODEV && !calls);root->magic=DUAL_SERVICE_MAGIC;
  uint32_t invalid[]={0,0xffffffff,0x20540000,0x34000001,0x347fffe4};
@@ -62,10 +63,12 @@ int main(void)
  assert(bes_gpio_call(3,12,1,io)==-ENOTSUP && calls==before);
  assert(bes_gpio_call(1,0,0,(void *)0x2055bfa4)==-EINVAL && calls==before);
  assert(!bes_gpio_call(1,0,0,io) && io->snapshot.pins==0x33000);
+ assert(!bes_gpio_call(5,0,0,io) && io->snapshot.inputs==0x33000);
  int statuses[]={-1,-2,-3,-4,-5,-6,123};
  int errors[]={-EINVAL,-ENOTSUP,-EPERM,-EBUSY,-ENODEV,-EIO,-EIO};
  for(unsigned i=0;i<7;i++) { response=statuses[i];assert(bes_gpio_call(1,0,0,io)==errors[i]); }
  response=0;for(corrupt=1;corrupt<=8;corrupt++) assert(bes_gpio_call(1,0,0,io)==-EIO);corrupt=0;
+ corrupt=9;assert(bes_gpio_call(5,0,0,io)==-EIO);corrupt=0;
  returned=0;assert(bes_gpio_connect()==-ENOTSUP);assert(bes_gpio_call(1,0,0,io)==-ENODEV);
  return 0;
 }
