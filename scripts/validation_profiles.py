@@ -20,9 +20,13 @@ class ValidationProfile:
     arbitration_probe: bool = False
     gpio_mode: int = 0
     gpio_api: bool = False
+    gpio_irq: bool = False
 
 
 PROFILES = MappingProxyType({
+    'gpio-irq-input': ValidationProfile(1, 600, 600, gpio_mode=1, gpio_api=True, gpio_irq=True),
+    'gpio-irq-restart': ValidationProfile(1, 600, 600, True, gpio_mode=1, gpio_api=True, gpio_irq=True),
+    'gpio-irq-recovery': ValidationProfile(1, 600, 600, True, 3, True, gpio_mode=1, gpio_api=True, gpio_irq=True),
     'gpio-api-input': ValidationProfile(1, 600, 600, gpio_mode=1, gpio_api=True),
     'gpio-api-led-restart': ValidationProfile(1, 600, 600, True, gpio_mode=2, gpio_api=True),
     'gpio-input': ValidationProfile(1, 600, 600, gpio_mode=1),
@@ -83,6 +87,8 @@ def _schema(data):
         raise ValueError('Unsupported validation schema; use the release analyzer')
     if schema == 2 and json.dumps(data.get('observation'), sort_keys=True) != json.dumps(observation_contract(data['validation_profile']), sort_keys=True):
         raise ValueError('Observation contract mismatch')
+    if schema == 1 and get_profile(data['validation_profile']).gpio_irq:
+        raise ValueError('GPIO IRQ profiles require layered observation evidence')
     if schema == 1 and 'observation' in data:
         raise ValueError('Legacy validation cannot declare observation scopes')
     return schema
@@ -120,4 +126,5 @@ def cmake_settings(name):
             'set(BES_VALIDATION_ARBITRATION_PROBE '
             + ('ON' if scenario.arbitration_probe else 'OFF') + ')\n'
             + f'set(BES_VALIDATION_GPIO_MODE {scenario.gpio_mode})\n'
+            + 'set(BES_VALIDATION_GPIO_IRQ ' + ('ON' if scenario.gpio_irq else 'OFF') + ')\n'
             + 'set(BES_VALIDATION_GPIO_API ' + ('ON' if scenario.gpio_api else 'OFF') + ')\n')

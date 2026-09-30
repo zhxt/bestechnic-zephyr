@@ -156,6 +156,8 @@ def audit(root, release, zephyr):
         for key in ('CONFIG_SERIAL', 'CONFIG_PINCTRL', 'CONFIG_CLOCK_CONTROL',
                     'CONFIG_RESET', 'CONFIG_PM', 'CONFIG_PM_DEVICE', 'CONFIG_TICKLESS_KERNEL'):
             expect(core, None, config.get(key, 'n') == 'n', 'unreviewed-runtime-owner', key)
+        native_irq = config.get('CONFIG_GPIO_BES2700YP_IRQ', 'n') == 'y'
+        expect(core, None, not native_irq or native_gpio, 'gpio-irq-owner', 'IRQ requires BTH GPIO')
         gpio_mode = int(config.get('CONFIG_BES2700YP_GPIO_VALIDATION', '0'))
         expect(core, None, gpio_mode in ((0, 1, 2) if core == 'bth' else (0,)),
                'gpio-owner', 'restricted GPIO service is callable only from BTH')
@@ -166,8 +168,15 @@ def audit(root, release, zephyr):
             manifest = json.loads(manifest_path.read_text())
             layout = json.loads(layout_path.read_text())
             wanted = {'gpio-input': 1, 'gpio-led': 2, 'gpio-api-input': 1,
-                      'gpio-api-led-restart': 2}.get(manifest.get('validation_profile'))
-            wanted_api = manifest.get('validation_profile', '').startswith('gpio-api-')
+                      'gpio-api-led-restart': 2, 'gpio-irq-input': 1, 'gpio-irq-restart': 1,
+                      'gpio-irq-recovery': 1}.get(manifest.get('validation_profile'))
+            wanted_api = manifest.get('validation_profile', '').startswith(('gpio-api-', 'gpio-irq-'))
+            wanted_irq = manifest.get('validation_profile', '').startswith('gpio-irq-')
+            irq_service = layout.get('gpio_irq_service', {})
+            expect(core, None, native_irq == wanted_irq and (not wanted_irq or
+                   all(irq_service.get(k) == v for k, v in dict(abi=5, capabilities=64, irq=44,
+                       priority=3, pins=0x30000, request_bytes=96, snapshot_bytes=64).items())),
+                   'gpio-irq-contract', 'IRQ profile and audited service must match')
             service = layout.get('gpio_service', {})
             expect(core, None, layout.get('validation_profile') == manifest.get('validation_profile')
                    and gpio_mode == wanted and service.get('mode') == gpio_mode
@@ -177,7 +186,7 @@ def audit(root, release, zephyr):
                    'gpio-profile', 'GPIO profile/config/ELF capabilities must match')
             report['gpio_qualification'] = dict(owner='BTH bootstrap service',
                 inputs=['P2_0', 'P2_1'], outputs=['P1_4'] if gpio_mode == 2 else [],
-                unchanged=['P1_5', 'P2_2', 'P2_3'], irq='polling only',
+                unchanged=['P1_5', 'P2_2', 'P2_3'], irq='P2_0/P2_1 edge via BTH IRQ 44' if native_irq else 'polling only',
                 pin_voltage='unchanged; requires board measurement')
         cpu = tree.get_node('/cpus/cpu@0')
         expect(core, cpu, core_policy['cpu'] in strings(cpu, 'compatible') and enabled(cpu)
@@ -266,7 +275,9 @@ def audit(root, release, zephyr):
                        and number(node, 'ngpios') == 18 and number(node, '#gpio-cells') == 2
                        and 'gpio-controller' in node.props and ranges is not None
                        and ranges.to_nums() == wanted_ranges
-                       and not any(k in node.props for k in ('interrupts', 'interrupts-extended',
+                       and ((node.props['interrupts'].to_nums() if 'interrupts' in node.props else [])
+                            == ([44, 3] if native_irq else []))
+                       and not any(k in node.props for k in ('interrupts-extended',
                                                            'clocks', 'resets', 'pinctrl-0')),
                        'gpio-service-owner', 'GPIO range, pin grant and inherited resources')
                 for alias, pin, flags in [('sw0', 16, 17), ('sw1', 17, 17), ('led0', 12, 1)]:

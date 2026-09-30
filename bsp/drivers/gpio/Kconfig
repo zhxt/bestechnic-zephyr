@@ -5,8 +5,17 @@ config GPIO_BES2700YP
 	depends on GPIO && SOC_BES2700YP_BTH && !USERSPACE
 	depends on DT_HAS_BESTECHNIC_BES2700YP_GPIO_ENABLED
 	help
-	  Restricted polling GPIO: P2_0/P2_1 input pull-up and optional P1_4
+	  Restricted GPIO: P2_0/P2_1 input pull-up and optional P1_4
 	  push-pull output. Calls require an IRQ-enabled privileged BTH thread.
 	  The boot service must already provide the GPIO capability. Device
 	  initialization only discovers it; applications configure pins after
-	  M55 launch. GPIO interrupts, hogs and init-time consumers are unsupported.
+	  M55 launch. GPIO hogs and init-time consumers are unsupported.
+
+config GPIO_BES2700YP_IRQ
+	bool "P2_0/P2_1 edge interrupts through the BTH PSC/AON service"
+	depends on GPIO_BES2700YP
+	help
+	  Enable single-edge interrupts and callbacks on the two input keys.
+	  Both-edge, level-triggered interrupts and wakeup are unsupported.
+	  Configuration requires a privileged IRQ-enabled thread; a callback
+	  may disable its pin. Unknown AON sources and storms quarantine IRQ 44.

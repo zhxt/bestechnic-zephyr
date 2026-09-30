@@ -31,7 +31,7 @@ The integration implements dual-core startup, basic kernel operation, and inter-
 | Bluetooth | Dual-mode Bluetooth 5.3 and LE Audio | Not integrated |
 | Audio | ADC/DAC, audio interfaces, ANC/EQ | Not integrated |
 | Sensor Hub / NPU | STAR-MC1, sensor engine, BECO NPU | Not integrated |
-| GPIO | GPIO pads | Optional Zephyr polling API for P2_0/P2_1 inputs and P1_4 output through the BTH service; no GPIO IRQ or pinctrl driver |
+| GPIO | GPIO pads | Restricted Zephyr API for P2_0/P2_1 inputs and P1_4 output; optional key edge IRQs through the BTH PSC/AON service; no pinctrl provider |
 | General peripherals | I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers yet |
 | Clock and power | Clock and power-management resources | HAL startup configuration at 24 MHz on both cores; Zephyr system power management not integrated |
 

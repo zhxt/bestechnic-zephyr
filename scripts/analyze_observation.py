@@ -4,6 +4,7 @@ import re
 import analyze_resources
 import analyze_uart_resources
 import analyze_arbitration
+import analyze_gpio_irq
 from validation_profiles import get_profile, layered
 
 ROW = re.compile(r'(\d+)/([IE])/BTH/OBSERVE/MAIN \| zephyr_observe (\w+) (.+) !')
@@ -35,7 +36,9 @@ def analyze(text, manifest, core, scope='long'):
     terminal = None
     last_time = None
     completed = False
-    if scenario.gpio_mode and not scenario.m55_restart:
+    if scenario.gpio_irq:
+        terminal_token = 'zephyr_gpio_irq result '
+    elif scenario.gpio_mode and not scenario.m55_restart:
         terminal_token = 'zephyr_gpio result '
     elif not scenario.m55_restart:
         terminal_token = 'zephyr_msg result '
@@ -152,7 +155,7 @@ def analyze(text, manifest, core, scope='long'):
                 completed = True
         else:
             errors.append('unknown observation event')
-    base = core('\n'.join(filtered)+'\n', manifest)
+    base = analyze_gpio_irq.run('\n'.join(filtered)+'\n', manifest, core)
     report = base['sessions'][0] if base.get('sessions') else dict(errors=[], missing=['boot'])
     if functional and report['missing']:
         errors.append('functional claim without complete scenario evidence')

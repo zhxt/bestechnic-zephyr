@@ -230,7 +230,7 @@ class Isolation:
                                 or not 1000<=d['age']<=1100 or abs(context['heartbeat_age']-d['age'])>40
                                 or d['trace_stage']!=5 or d['injection']!=0):
                             errors.append('unreadable fatal fallback evidence')
-                    if release is None or not 1000<=now-release<=12000:
+                    if release is None or not 1000<=now-release-(m.get('_gpio_irq_pause_ms', 0) if m.get('validation_profile')=='gpio-irq-recovery' else 0)<=12000:
                         errors.append('extended fault deadline')
             elif k == 'reset':
                 if (any(v > 0xffffffff for v in d.values()) or d['version'] != 1

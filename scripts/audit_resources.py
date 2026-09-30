@@ -62,7 +62,7 @@ def check_gpio_irq_scope(rows, name):
     if name.startswith('bes2700yp_gpio') or name == 'gpio_masked':
         if any(op.split('.')[0] in ('cpsid', 'msr') for _, op, _ in rows):
             raise ValueError('GPIO HAL changes interrupt masking: ' + name)
-    if name != 'bes_gpio_dispatch' or not rows:
+    if name not in ('bes_gpio_dispatch', 'bes_gpio_irq_dispatch') or not rows:
         return
     by_pc = {pc: i for i, (pc, _, _) in enumerate(rows)}
     pending, seen = [(rows[0][0], False)], set()
@@ -92,20 +92,24 @@ def check_gpio_irq_scope(rows, name):
             pending.append((rows[i+1][0], masked))
 
 
-def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False, gpio_api=False):
-    prefix = 'bes_gpio' if gpio else 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
+def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=False, gpio_api=False, gpio_irq=False):
+    prefix = 'bes_gpio_irq' if gpio_irq and not gpio else 'bes_gpio' if gpio else 'bes_arbitration' if arbitration else 'bes_uart_resource' if uart else 'bes_resource'
     descriptor = prefix + '_service'
     dispatch = prefix + '_dispatch'
     allowed = ALLOWED | {dispatch} | ({'bes2700yp_uart0_read'} if uart else set())
     if gpio:
         allowed |= {'bes2700yp_gpio_access', 'bes2700yp_gpio_sample', 'gpio_masked', 'bes_arbitration_enter', 'bes_arbitration_leave'}
+    if gpio_irq and not gpio:
+        allowed |= {'bes2700yp_gpio_irq_claim', 'bes2700yp_gpio_irq_config',
+                    'bes2700yp_gpio_irq_ack', 'bes2700yp_gpio_irq_read', 'irq_bank_ready'}
     library = generated / 'resource_validator.so'
     subprocess.run(['cc', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'include/bestechnic/bes2700yp'),
                     str(root / 'platforms/bes2700yp/resources/contract.c'),
                     str(root / 'platforms/bes2700yp/resources/uart_contract.c'),
                     str(root / 'platforms/bes2700yp/resources/arbitration_contract.c'),
-                    str(root / 'platforms/bes2700yp/resources/gpio_contract.c'), '-o', str(library)], check=True)
+                    str(root / 'platforms/bes2700yp/resources/gpio_contract.c'),
+                    str(root / 'platforms/bes2700yp/resources/gpio_irq_contract.c'), '-o', str(library)], check=True)
     validator = ctypes.CDLL(str(library))
     validate_descriptor = getattr(validator, prefix + '_descriptor_valid')
     validate_descriptor.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
@@ -156,7 +160,7 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
         if not rows:
             raise ValueError('missing resource disassembly: ' + name)
         check_control_flow(rows, name)
-        if gpio:
+        if gpio or gpio_irq:
             check_gpio_irq_scope(rows, name)
         own, children = 0, []
         for pc, mnemonic, operands in rows:
@@ -199,6 +203,32 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
     if stack > 256:
         raise ValueError('resource dispatch exceeds 256-byte stack budget')
     bsyms = symbols(bth, cross)
+    if gpio_irq and not gpio:
+        for name in ('bes_gpio_irq_connect', 'bes_gpio_irq_descriptor_valid', 'bes_gpio_irq_call',
+                     'bes_gpio_irq_read', 'gpio_bes_isr', 'gpio_bes_manage_callback',
+                     'bes_gpio_irq_get_state', 'bes_gpio_irq_get_stats'):
+            if name not in bsyms:
+                raise ValueError('missing GPIO IRQ consumer: ' + name)
+        bsegments = parse_load_segments(run_readelf(bth))
+        bdata = bth.read_bytes()
+        table = bsyms.get('_sw_isr_table', 0)
+        off = file_span(bsegments, table + 44*8, 8)
+        argument, handler = struct.unpack_from('<2I', bdata, off)
+        if not argument or handler != bsyms['gpio_bes_isr'] | 1:
+            raise ValueError('GPIO IRQ 44 does not bind the reviewed handler')
+        config = bth.with_name('.config').read_text()
+        if 'CONFIG_GEN_IRQ_START_VECTOR=0\n' not in config:
+            raise ValueError('GPIO IRQ table indexing differs')
+        for name in ('irq_busy', 'claimed'):
+            addr=syms.get(name, 0)
+            if sizes.get(name)!=4 or not syms.get('__bss_start__', 0)<=addr<=syms.get('__bss_end__', 0)-4:
+                raise ValueError('GPIO IRQ ownership state placement')
+        return dict(abi=words[1], capabilities=words[3], descriptor=address, dispatch=words[4],
+                    request_bytes=words[5], snapshot_bytes=words[6], irq=44, priority=3,
+                    pins=0x30000, reachable=sorted(seen), stack_bound_bytes=stack,
+                    descriptor_read_only=True, integer_only=True, bounded_call_graph=True,
+                    hardware_irqs_enabled=True, ack_context='BTH IRQ 44',
+                    unknown_source='quarantine without acknowledgement')
     if gpio:
         fault = syms.get('gpio_fault', 0)
         if (not fault or sizes.get('gpio_fault') != 4 or
@@ -223,7 +253,8 @@ def audit(elf, bth, cross, root, generated, uart=False, arbitration=False, gpio=
                 api_targets.append(None)
             api_targets += ['gpio_bes_port_get_raw', 'gpio_bes_port_set_masked_raw',
                             'gpio_bes_port_set_bits_raw', 'gpio_bes_port_clear_bits_raw',
-                            'gpio_bes_port_toggle_bits', 'gpio_bes_pin_interrupt_configure', None, None]
+                            'gpio_bes_port_toggle_bits', 'gpio_bes_pin_interrupt_configure',
+                            'gpio_bes_manage_callback' if gpio_irq else None, None]
             if 'CONFIG_GPIO_GET_DIRECTION=y\n' in config:
                 api_targets.append(None)
             off = file_span(segments, bsyms['bes_gpio_api'], len(api_targets)*4)

@@ -12,5 +12,14 @@ config BES2700YP_GPIO_VALIDATION
 	help
 	  Selected by the fixed validation profile: 1 enables P2_0/P2_1
 	  polling, 2 additionally drives P1_4. Output requires compatible
-	  board IO/LED voltage. No GPIO IRQ. Standard API profiles use the
+	  board IO/LED voltage. Standard API profiles use the
 	  restricted BTH GPIO driver.
+
+config BES2700YP_GPIO_IRQ_VALIDATION
+	bool "Interactive GPIO IRQ qualification"
+	default n
+	help
+	  Validation-only sequencing: the M55 message worker waits for BTH to
+	  publish its first message state. The heartbeat remains active while
+	  the operator provides pre-restart GPIO evidence. Traffic deadlines
+	  start only after this bounded interaction and retain their limits.

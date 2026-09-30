@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+&aon_gpio {
+	status = "okay";
+	interrupt-parent = <&nvic>;
+	interrupts = <44 3>;
+	gpio-reserved-ranges = <0 16>;
+};

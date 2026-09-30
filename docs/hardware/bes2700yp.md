@@ -82,7 +82,7 @@ This table concerns this repository, regardless of upstream Zephyr subsystem ava
 | Audio | No ADC/DAC, I²S/TDM/SPDIF/DMIC, or ANC/EQ path |
 | Sensor Hub / BECO NPU | No startup, Zephyr target, or NPU runtime interface |
 | Flash read/write | HAL supports boot-time flash operations; no Zephyr flash driver or standard application interface |
-| GPIO | Optional restricted Zephyr GPIO driver: P2_0/P2_1 input pull-up, P1_4 output; thread context only, no IRQ |
+| GPIO | Optional restricted Zephyr GPIO driver: P2_0/P2_1 input pull-up, P1_4 output; thread data access; optional P2_0/P2_1 edge IRQ callbacks |
 | I²C, SPI, PWM, GPADC, DMA, watchdog | No corresponding BES2700YP Zephyr drivers |
 | Security | No security-engine, TRNG, eFuse, or secure-boot validation; image CRC checks integrity only |
 
@@ -152,7 +152,7 @@ CPU reset alone does not prove that future DMA or other bus masters are idle.
 IRQ identity is `(core, interrupt controller, IRQ)`. Current mailbox RX/TX_DONE
 IRQs are BTH 39/37 and M55 41/39, with priority 3. BTH UART0 uses IRQ 17 with
 priority 2. Both cores use three priority bits, with 64 BTH and 72 M55 external
-IRQs. AON GPIO routing has not been established by this port and must not be
+IRQs. The optional key IRQ driver selects PSC/AON IRQ 44 for BTH. Other GPIO routing must not be
 inferred by copying an IRQ number between cores.
 
 ### Memory ownership and aliases
@@ -195,4 +195,4 @@ hardware validation.
 
 ## Restricted GPIO profiles
 
-The optional [GPIO qualification](../gpio.md) service polls P2_0/P2_1 and can drive P1_4. P1_5 and UART pads remain unchanged. It is disabled in ordinary profiles. Standard API profiles register a restricted Zephyr GPIO controller backed by the same service; pinctrl and GPIO IRQ support are absent. Actual-board wiring and electrical levels require confirmation.
+The optional [GPIO qualification](../gpio.md) service polls P2_0/P2_1 and can drive P1_4. P1_5 and UART pads remain unchanged. It is disabled in ordinary profiles. Standard API profiles register a restricted Zephyr GPIO controller backed by the same service; pinctrl is absent; separate key IRQ profiles use the restricted BTH PSC/AON entry. Actual-board wiring and electrical levels require confirmation.

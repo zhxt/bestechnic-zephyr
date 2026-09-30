@@ -65,3 +65,10 @@ if(BES_GPIO_MODE GREATER 0)
   set_source_files_properties(gpio_service.c
     PROPERTIES COMPILE_OPTIONS "-fstack-usage;-mgeneral-regs-only")
 endif()
+
+if(BES_GPIO_IRQ)
+  target_sources(adapter PRIVATE gpio_irq_service.c)
+  target_compile_definitions(adapter PRIVATE BES_GPIO_IRQ=1)
+  set_source_files_properties(gpio_irq_service.c
+    PROPERTIES COMPILE_OPTIONS "-fstack-usage;-mgeneral-regs-only")
+endif()

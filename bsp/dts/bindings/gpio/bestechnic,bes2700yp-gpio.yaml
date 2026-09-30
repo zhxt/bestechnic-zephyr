@@ -5,8 +5,8 @@ description: |
   them or claim arbitrary pads. Pin numbers use bank * 8 + offset:
   16/17 are P2_0/P2_1 input pull-up, 12 is optional P1_4 push-pull output.
   Use gpio-reserved-ranges to exclude every other pin. Configuration is
-  deferred until M55 is running or held by the lifecycle service. IRQs,
-  GPIO hogs and automatic consumers configured during boot are unsupported.
+  deferred until M55 is running or held by the lifecycle service. Optional interrupts specify the BTH
+  PSC/AON aggregate for P2_0/P2_1 single edges. GPIO hogs and automatic consumers configured during boot are unsupported.
 compatible: "bestechnic,bes2700yp-gpio"
 include: [base.yaml, gpio-controller.yaml]
 properties:

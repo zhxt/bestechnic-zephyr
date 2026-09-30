@@ -6,6 +6,10 @@
 #include <bes2700yp_resources.h>
 #include <bes2700yp_uart_resources.h>
 
+#ifdef BES_GPIO_IRQ
+#include <bes2700yp_gpio_irq.h>
+extern const struct bes_resource_descriptor bes_gpio_irq_service;
+#endif
 #ifdef BES_GPIO_MODE
 #include <bes2700yp_gpio.h>
 extern const struct bes_resource_descriptor bes_gpio_service;
@@ -103,6 +107,9 @@ static __attribute__((noinline,noclone)) int dual_dispatch(uint32_t op, uint32_t
 {
  if (op == BES_RESOURCE_DISCOVER) {
 #ifdef BES_GPIO_MODE
+#ifdef BES_GPIO_IRQ
+  if (arg == BES_GPIO_IRQ_ABI) { return (int32_t)(uintptr_t)&bes_gpio_irq_service; }
+#endif
   if (arg == BES_GPIO_ABI) { return (int32_t)(uintptr_t)&bes_gpio_service; }
 #endif
   if (arg == BES_ARBITRATION_ABI) { return (int32_t)(uintptr_t)&bes_arbitration_service; }

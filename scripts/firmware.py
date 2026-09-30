@@ -92,10 +92,12 @@ def configure(a):
     common += f'CONFIG_BES2700_M55_FAULT_CASE={scenario.fault_case}\n'
     common += 'CONFIG_BES2700_M55_RECOVERY=' + ('y' if scenario.recovery else 'n') + '\n'
     common += f'CONFIG_BES2700_M55_RECOVERY_FAIL_STEP={scenario.recovery_fail_step}\n'
+    common += 'CONFIG_BES2700YP_GPIO_IRQ_VALIDATION=' + ('y' if scenario.gpio_irq else 'n') + '\n'
     write(a.generated / 'm55.conf', common)
     write(a.generated / 'bth.conf', common + f'CONFIG_DUAL_DURATION_SECONDS={identity["heartbeat"]}\n'
           + f'CONFIG_BES2700YP_GPIO_VALIDATION={scenario.gpio_mode}\n'
-          + ('CONFIG_GPIO=y\nCONFIG_GPIO_BES2700YP=y\n' if scenario.gpio_api else ''))
+          + ('CONFIG_GPIO=y\nCONFIG_GPIO_BES2700YP=y\n' if scenario.gpio_api else '')
+          + ('CONFIG_GPIO_BES2700YP_IRQ=y\n' if scenario.gpio_irq else ''))
     write(a.generated / 'boot_profile_id.h',
           f'#define BOOT_PROFILE_ID 0x{identity["profile"]:08x}U\n#define BOOT_PROFILE_VARIANT 2U\n')
     # Keep ROM/programmer metadata and reserved-sector reporting compatible.
@@ -279,12 +281,16 @@ def final(a):
     gpio_mode = get_profile(identity['validation_profile']).gpio_mode
     if gpio_mode:
         report['gpio_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, gpio=True,
-            gpio_api=get_profile(identity['validation_profile']).gpio_api)
+            gpio_api=get_profile(identity['validation_profile']).gpio_api,
+            gpio_irq=get_profile(identity['validation_profile']).gpio_irq)
         report['gpio_service']['mode'] = gpio_mode
         expected_cap = 56 if gpio_mode == 2 else 40
         if report['gpio_service']['capabilities'] != expected_cap:
             raise ValueError('GPIO build capability differs from profile')
         layout['gpio_service'] = report['gpio_service']
+    if get_profile(identity['validation_profile']).gpio_irq:
+        report['gpio_irq_service'] = audit_resources(a.elf, belf, a.cross, ROOT, generated, gpio_irq=True)
+        layout['gpio_irq_service'] = report['gpio_irq_service']
     report['arbitration_guard'] = audit_arbitration(a.elf, a.cross, get_profile(identity['validation_profile']).arbitration_probe)
     layout.update(version='V08c_QMSG_T2', build_architecture='bestechnic-zephyr-v1', test=8,
         log_version=3, prefix_version=1, duration_seconds=identity['heartbeat'],

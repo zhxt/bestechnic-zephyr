@@ -8,7 +8,7 @@ from pathlib import Path
 import analyze_boot_profile as profile
 from analyze_dual_boot import prefix_contract
 from analyze_dual_message import FIELDS
-from validation_profiles import validate_manifest, layered
+from validation_profiles import validate_manifest, layered, get_profile
 import analyze_observation as observation
 import analyze_gpio_restart
 from analyze_lifecycle_contract import LOG_MODULE, LOG_NAMESPACE, LOG_CONTRACT, FAULT_REASONS
@@ -103,6 +103,7 @@ class Restart:
         sampler=m.get('reset_sampler',0)
         if not isinstance(sampler,int) or not sampler&1 or not 0x00500000<=sampler<0x00510000:errors.append('sampler manifest')
         endpoints={};elapsed={};origins={};release_time={}
+        pause=m.get('_gpio_irq_pause_ms', 0) if get_profile(m['validation_profile']).gpio_irq else 0
         for r in rows:
             k=r['kind'];d=r['fields'];n=d.get('round');session=n+1 if n is not None else None
             fieldsets={'event':'round session step rc elapsed','ready':'round session peer_ms beat stack elapsed rc',
@@ -143,7 +144,7 @@ class Restart:
                     d['elapsed']!=(d['raw_end']-d['raw_start'])&0xffffffff or d['elapsed']>=60000):
                     errors.append('reset sampling/readback')
             elif k=='event':
-                if set(d)!=set('round session step rc elapsed'.split()) or d['session']!=session or not 0<=d['elapsed']<=45000:errors.append('event identity/deadline')
+                if set(d)!=set('round session step rc elapsed'.split()) or d['session']!=session or not 0<=d['elapsed']<=45000+(pause+100 if n==0 else 0):errors.append('event identity/deadline')
                 if d['step']==1:origins[n]=r['time']
                 if d['step']==4:release_time[n]=r['time']
                 if d['elapsed']<elapsed.get(n,0):errors.append('elapsed regression')
@@ -163,7 +164,7 @@ class Restart:
                 if d['session']!=session or d['phase']!=4 or d['reset_clr']&16 or d['core_vtor']!=0x200c0000 or mapping!=ram_mapping:
                     errors.append('reset readback/RAM retention')
             elif k=='session':
-                if set(d)!=set('round session elapsed reset_held peer_idle channel_clean rc'.split()) or d['session']!=session or any(d[x]!=1 for x in ('reset_held','peer_idle','channel_clean')) or not elapsed.get(n,0)<=d['elapsed']<=45000:errors.append('session shutdown')
+                if set(d)!=set('round session elapsed reset_held peer_idle channel_clean rc'.split()) or d['session']!=session or any(d[x]!=1 for x in ('reset_held','peer_idle','channel_clean')) or not elapsed.get(n,0)<=d['elapsed']<=45000+(pause+100 if n==0 else 0):errors.append('session shutdown')
                 a=endpoints.get((n,0));b=endpoints.get((n,1))
                 if not a or not b or a['rx']!=b['kicks'] or b['rx']!=a['kicks']:errors.append('IRQ accounting')
             elif k=='peer':

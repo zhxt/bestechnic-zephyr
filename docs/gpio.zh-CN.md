@@ -109,7 +109,7 @@ Zephyr GPIO 驱动已经实现。
 | P1_4 / 12 | 推挽输出，可指定初始高/低 | 仅输出场景 |
 | 其他引脚，包括 P1_5 及 UART 引脚 | 不开放 | DTS 保留，驱动拒绝访问 |
 
-方向按引脚限定。不支持下拉、无偏置输入、开漏、断开模式、GPIO IRQ 及 M55 调用。
+方向按引脚限定。不支持下拉、无偏置输入、开漏、断开模式及 M55 调用。这两个轮询场景不启用 IRQ。
 设备初始化仅验证服务描述符，应用在 M55 启动后配置引脚；`device_is_ready()`
 不表示当前生命周期阶段允许写操作。未支持 GPIO hog 及初始化期间自动配置的
 LED/输入消费者。板级禁用的 `gpio-keys`、`gpio-leds` 节点仅提供 DT specifier。
@@ -140,3 +140,55 @@ LED/输入消费者。板级禁用的 `gpio-keys`、`gpio-leds` 节点仅提供 
 完整生命周期和观察协议之外记录 `zephyr_gpio_api` 的 baseline/checkpoint/observe。
 short 通过要求全部 11 个会话和功能后的 60 秒；观察窗口不替代功能步骤。
 更长运行另行登记。物理断电、LED 目视及电压仍需外部记录。
+
+## 按键边沿中断
+
+`CONFIG_GPIO_BES2700YP_IRQ` 为 P2_0/P2_1 增加物理上升沿、下降沿和 Zephyr callback。
+双边沿、电平触发返回 `-ENOTSUP`，不使用软件翻转极性模拟双边沿。唤醒、低功耗、任意
+引脚及 M55 GPIO 所有权不在接口范围内。原轮询场景保持不启用 GPIO IRQ。
+
+路径为 AON GPIO bank → PSC BTH GPIO 路由 → BTH NVIC IRQ 44，优先级 3。
+发现操作 9、参数 5 返回独立 ABI 5 描述符，能力位 64，诊断请求 96 字节、状态 64 字节；
+原 GPIO 服务不变。[IRQ 契约](../include/bestechnic/bes2700yp/bes2700yp_gpio_irq.h)
+区分 READ、CLAIM、CONFIG、ACK。CONFIG 接受 pin 16/17，模式 0 禁用、1 下降沿、2 上升沿；
+ACK 返回所拥有的 pending 掩码。线协议错误：-1 参数，-2 所有权冲突，-3 bank 不可用，
+-4 状态/读回故障，-5 未取得所有权或阶段不可用，-6 上下文或并发入口。
+
+驱动先将两键配置为上拉输入，再取得入口所有权。已有 BTH GPIO 路由、其他核路由目标
+引脚、非 GPIO 的活动 AON 状态或不兼容的 mux/direction/pull 都会被拒绝。只增加 GPIO
+唤醒汇聚门控，保留其他继承位。这是限定所有权的汇聚入口；扩展其他来源须另行设计共享分发。
+
+线程 CONFIG 和完整 READ 使用 GPIO 设备信号量串行化，并只屏蔽 IRQ 44，其他 IRQ 保持
+开启。服务拒绝 IRQ 44 仍使能、或 PRIMASK/BASEPRI 非零的线程调用。短全局临界区仅保护
+RAM 记账，不覆盖硬件访问。重配前屏蔽并禁用目标位，只清除该位的使能前残留；禁用一个
+按键保留另一按键路由。修改 GPIO 输入配置前须先禁用该引脚 IRQ。
+
+ISR 读取路由状态，只确认自己拥有的位，再执行 Zephyr callback，不使用 MEMSC、不等待
+信号量、不打印、不去抖。callback 可移除自身并通过独立标量路径禁用按键；ISR 内使能或
+改变极性返回 `-EWOULDBLOCK`。普通 GPIO 读写仍只供线程使用。
+`bes_gpio_irq_get_stats()` 返回原始事件、故障和以内核硬件周期计的最大 ISR 耗时；
+`bes_gpio_irq_get_state()` 在线程中安全读取完整硬件快照。
+
+未知 AON 状态保留 pending。服务失败、连续八次空入口或一个 100 ms 统计区间内超过
+256 次入口，会锁存故障并禁用 NVIC IRQ 44。故障后需重启；不自动重试，也不据此声明
+输入频率能力。
+
+应用 callback 只写有界事件队列，溢出明确失败。线程以 10 ms 采样、50 ms 去抖；IRQ
+使能阶段每个完整按下/松开周期必须有新中断证据。机械抖动可能产生更多原始 IRQ，不能
+要求一次操作恰好一次 IRQ。明确禁用的阶段用轮询证明按键实际动作，并要求 callback 零增长。
+
+| 场景 | 必需操作 | 分析器 |
+|---|---|---|
+| `gpio-irq-input` | 阶段 1/2：下降沿/上升沿，两键各十次；阶段 3：禁用 IRQ，两键各一次；阶段 4：恢复下降沿，两键各一次 | `analyze_dual_message.py` |
+| `gpio-irq-restart` | 阶段 10：IPC/重启前两键各十次；阶段 11：11 会话/10 次重启后各十次 | `analyze_dual_restart.py` |
+| `gpio-irq-recovery` | 阶段 10：IPC 停滞注入前两键各十次；阶段 11：一次恢复后各十次 | `analyze_dual_recovery.py` |
+
+每次等待 `zephyr_gpio_irq prompt`，先松开两键，再按提示操作；每个电平至少保持 150 ms。
+每阶段交互上限 180 秒。测试专用的 M55 worker 等待 BTH worker 首次发布，心跳监测持续；
+交互后 IPC、READY、复位、进度和 QUIESCE 的超时不变。IRQ 配置和 callback 注册跨越重启、
+恢复及观察阶段保留。
+
+分析器使用匹配 release 的 `layout.json`。`--scope short` 检查完整功能结束后 60 秒；
+`--scope long` 使用已有 600 秒健康观察契约。等待不能代替真实按键证据；必须有交互阶段、
+边界配置保持和 IRQ 健康快照。这里只验收按键事件和控制；精确边沿计数及频率上限需要
+干净的外部信号或固定方向回环。

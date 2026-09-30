@@ -287,3 +287,6 @@ UART 资源证据使用 `layout.json` 中独立版本的描述符。每个必需
 `gpio-input` 与 `gpio-led` 在顺序 IPC 基础上增加人工按键循环和可选 LED 输出。见[接线、电气核对、操作与验收](gpio.zh-CN.md)。使用 `analyze_dual_message.py --scope short` 和对应 release/layout.json 分析。
 
 标准 GPIO API 场景为 `gpio-api-input`（人工按键，消息分析器）及 `gpio-api-led-restart`（输出跨 M55 正常重启，重启分析器），均支持功能后的 short 观察。见 [API 与使用边界](gpio.zh-CN.md#标准-zephyr-gpio-api)。
+
+按键边沿 IRQ 场景为 `gpio-irq-input`、`gpio-irq-restart`、`gpio-irq-recovery`。
+必须具备人工按键、路由保持和真实 ISR 证据；见[边沿 IRQ 契约与阶段顺序](gpio.zh-CN.md#按键边沿中断)。

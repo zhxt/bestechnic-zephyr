@@ -7,6 +7,12 @@ PORT=Path(__file__).resolve().parents[2]
 
 class RestartWorkers(unittest.TestCase):
     def test_eleven_real_worker_sessions(self):
+        self.run_workers(False)
+
+    def test_interactive_gate_waits_before_ipc_deadlines(self):
+        self.run_workers(True)
+
+    def run_workers(self, gated):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             for name in ('cmsis_core.h','zephyr/kernel.h','zephyr/drivers/mbox.h','zephyr/device.h'):
@@ -14,13 +20,14 @@ class RestartWorkers(unittest.TestCase):
             (root/'m55_payload.h').write_text('#define M55_BUILD_ID 0x87654321\n')
             for side in ('bth','m55'):
                 text=('#define CC_BTH 1\n' if side=='bth' else '')+f'#define q_idle q_idle_{side}\n#include "{PORT}/platforms/bes2700yp/ipc/worker.c"\n'
-                text+=f'void run_{side}(void) {{'+('q_start();' if side=='bth' else '')+'worker(0,0,0);}\n'
+                text+=f'void run_{side}(void) {{'+('k_msleep(60000);' if gated and side=='bth' else '')+('q_start();' if side=='bth' else '')+'worker(0,0,0);}\n'
                 if side=='m55':text+='void cold_reset_m55(void) { worker_idle=0;q_received.count=0;own=(struct q_state){0};other=(struct q_state){0}; }\n'
                 (root/(side+'.c')).write_text(text)
             exe=root/'restart'
             subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',
                 '-fsanitize=undefined','-fno-sanitize-recover=all','-DCONFIG_BES2700_M55_RESTART=1',
                 '-DCONFIG_DUAL_MSG_MODE=1','-DCONFIG_DUAL_IPC_SECONDS=600',
+                *(['-DCONFIG_BES2700YP_GPIO_IRQ_VALIDATION=1'] if gated else []),
                 '-I',str(root),'-I',str(PORT/'tests/dual_message'),'-I',str(PORT/'include/bestechnic/bes2700yp'),
                 '-I',str(PORT/'platforms/bes2700yp/ipc'),str(root/'bth.c'),str(root/'m55.c'),
                 str(PORT/'tests/dual_message/restart_model.c'),'-o',str(exe)],check=True)

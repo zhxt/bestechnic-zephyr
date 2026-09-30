@@ -13,7 +13,7 @@ MASKS = dict(mux_led=0xf0000, mux_keys=0, pull_up=0x1000, pull_down=0x1000,
 
 def run(text, manifest, core):
     scenario = get_profile(manifest['validation_profile'])
-    if not (scenario.gpio_api and scenario.m55_restart):
+    if scenario.gpio_irq or not (scenario.gpio_api and scenario.m55_restart):
         return core(text, manifest)
     clean, rows, errors, missing = [], [], [], []
     last_time = None

@@ -137,7 +137,7 @@ Zephyr handles logical active-low conversion; raw operations retain physical lev
 | Other pins, including P1_5 and UART pads | Not granted | Reserved in DTS and rejected by the driver |
 
 Direction is restricted per pin. Pull-down, unbiased input, open-drain,
-disconnected mode, GPIO IRQs and M55 calls are unsupported. Device initialization
+disconnected mode and M55 calls are unsupported. These two polling profiles do not enable IRQs. Device initialization
 only validates the service descriptor. The application must configure pins after
 M55 launch; `device_is_ready()` does not imply the lifecycle phase permits a write.
 GPIO hogs and automatic LED/input consumers configured during initialization are
@@ -152,8 +152,8 @@ thread. No spinlock covers AON register access. Direct service writers must not 
 mixed with driver writers. Diagnostic read-only snapshots remain available.
 Configure pins from a single application context before concurrent data operations.
 
-Invalid pin/mask requests return `-EINVAL`; unsupported directions, flags and IRQ
-configuration return `-ENOTSUP`. Output writes before successful output configuration
+Invalid pin/mask requests return `-EINVAL`; unsupported directions and flags return
+`-ENOTSUP`. IRQ configuration requires the optional capability described below. Output writes before successful output configuration
 return `-EACCES`. Service errors propagate; fault-latched reads return `-EIO`.
 A failed port read leaves its output argument unchanged. GPIO clocks/reset must
 already be usable; the driver does not change clock gates, resets, voltage or pad
@@ -178,3 +178,73 @@ addition to the complete lifecycle and observation protocol. A short pass requir
 all 11 sessions and the following 60 seconds; the observation window does not
 replace functional coverage. Longer execution is optional and separately reported.
 Physical power cycling, LED appearance and voltage remain external observations.
+
+## Key edge interrupts
+
+`CONFIG_GPIO_BES2700YP_IRQ` adds physical rising/falling edges and Zephyr callbacks
+for P2_0/P2_1. Both-edge and level-triggered modes return `-ENOTSUP`; the driver
+does not emulate both-edge detection. Wakeup, low power, arbitrary pins and M55
+GPIO ownership are outside this interface. Existing polling profiles retain
+IRQ-disabled controller configuration.
+
+The route is AON GPIO bank → PSC BTH GPIO route → BTH NVIC IRQ 44, priority 3.
+Discovery operation 9, argument 5 returns an independent ABI 5 descriptor with
+capability 64 and 96-byte diagnostic request/64-byte state. The old GPIO service
+is unchanged. The [IRQ contract](../include/bestechnic/bes2700yp/bes2700yp_gpio_irq.h)
+separates READ, CLAIM, CONFIG and ACK. CONFIG accepts pin 16/17 and mode 0 disabled,
+1 falling or 2 rising; ACK returns an owned pending mask. Wire errors are -1 invalid,
+-2 ownership conflict, -3 unavailable bank, -4 state/readback fault, -5 unclaimed or
+unavailable phase and -6 invalid context or concurrent entry.
+
+The driver configures both keys as pull-up inputs before claiming the entry.
+Claim rejects an existing BTH GPIO route, another core routing the keys, foreign
+active AON status, or incompatible mux/direction/pulls. It preserves all inherited
+wake gates and adds only the GPIO gate. This is a restricted aggregate owner,
+not a general AON dispatcher. Other sources need an explicit shared-entry design.
+
+Thread CONFIG and diagnostic READ serialize through the GPIO device semaphore and
+disable only IRQ 44; all other IRQs remain enabled. The service rejects a thread
+call with that NVIC entry enabled or with PRIMASK/BASEPRI set. Hardware accesses
+never run under the short global masks used for RAM bookkeeping. A pin is masked
+and disabled before reconfiguration; only its pre-arm residue is cleared. Disabling
+one key retains the other key's route. Disable the pin IRQ before changing its
+GPIO input configuration.
+
+The ISR reads routed pending state, acknowledges only owned bits and fires Zephyr
+callbacks. It performs no MEMSC operation, semaphore wait, logging or debounce.
+Callbacks may remove themselves and disable a pin through the dedicated scalar
+path; enabling/changing polarity from an ISR returns `-EWOULDBLOCK`. Ordinary GPIO
+reads/writes remain thread-only. `bes_gpio_irq_get_stats()` reports event counts,
+latched fault and maximum ISR time in kernel hardware cycles;
+`bes_gpio_irq_get_state()` safely reads the hardware snapshot from a thread.
+
+Unknown AON status is never acknowledged. A service failure, eight consecutive
+empty entries, or more than 256 entries in a 100 ms accounting interval latches a
+fault and disables NVIC IRQ 44. The low-rate key driver requires reboot after a
+fault; it does not silently retry or claim an input frequency specification.
+
+The application callback writes a bounded queue; overflow is a test failure.
+The thread samples/debounces at 10/50 ms, requiring fresh IRQ evidence for each
+complete cycle while enabled. Raw IRQ counts may exceed stable key cycles due to
+mechanical bounce. The explicitly disabled phase uses pad polling to prove real
+key operation and requires zero additional callbacks.
+
+| Profile | Required interaction | Analyzer |
+|---|---|---|
+| `gpio-irq-input` | Stages 1/2: falling/rising, ten cycles per key each; stage 3: IRQs disabled, one cycle each; stage 4: re-enabled falling edge, one cycle each | `analyze_dual_message.py` |
+| `gpio-irq-restart` | Stage 10: ten cycles each before IPC/restarts; stage 11: ten cycles each after 11 sessions/10 restarts | `analyze_dual_restart.py` |
+| `gpio-irq-recovery` | Stage 10: ten cycles each before IPC stall injection; stage 11: ten cycles each after one recovery | `analyze_dual_recovery.py` |
+
+Wait for each `zephyr_gpio_irq prompt`, release both keys, then press/release each
+key with at least 150 ms at each level. Each stage has a 180-second interaction
+limit. The test-only M55 worker waits for the BTH worker's first publication;
+heartbeat monitoring remains active. IPC, READY, reset, progress and QUIESCE
+budgets retain their limits after interaction. Configuration and callback
+registration remain in place across restart/recovery and throughout observation.
+
+Use the matching release `layout.json` and `--scope short` for the 60 seconds
+following complete functionality, or `--scope long` for the existing 600-second
+health contract. Missing real key events cannot be replaced by waiting longer.
+The analyzers require both stages, hardware retention checkpoints and IRQ health
+snapshots. These tests qualify key events and control, not exact edge counts or
+maximum frequency; those require a clean external signal or fixed-direction loopback.

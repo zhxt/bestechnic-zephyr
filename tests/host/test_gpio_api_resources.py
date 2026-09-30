@@ -59,3 +59,26 @@ class GpioApiResources(unittest.TestCase):
             layout['gpio_service']['zephyr_api'] = invalid
             (case.release / 'layout.json').write_text(json.dumps(layout))
             case.check('gpio-profile')
+
+    def test_irq_profile_keeps_other_routes_and_polling_profiles_closed(self):
+        def irq_fixture():
+            case=self.make_fixture()
+            case.change('bth','<0 12>, <13 3>','<0 16>')
+            case.change('bth','gpio-controller;', 'interrupt-parent = <&nvic>; interrupts = <44 3>; gpio-controller;')
+            case.change('bth','CONFIG_BES2700YP_GPIO_VALIDATION=2','CONFIG_BES2700YP_GPIO_VALIDATION=1', 'config')
+            with (case.release/'bth.config').open('a') as stream:
+                stream.write('CONFIG_GPIO_BES2700YP_IRQ=y\n')
+            manifest=dict(validation_profile='gpio-irq-input')
+            layout=dict(manifest,gpio_service=dict(mode=1,capabilities=40,zephyr_api=True),
+                gpio_irq_service=dict(abi=5,capabilities=64,irq=44,priority=3,pins=0x30000,
+                                      request_bytes=96,snapshot_bytes=64))
+            (case.release/'manifest.json').write_text(json.dumps(manifest))
+            (case.release/'layout.json').write_text(json.dumps(layout))
+            return case
+        irq_fixture().check()
+        for old,new in [('<44 3>','<9 3>'),('<44 3>','<44 2>'),('<0 16>','<0 15>')]:
+            case=irq_fixture();case.change('bth',old,new);case.check('gpio-service-owner')
+        case=irq_fixture();case.change('bth','CONFIG_GPIO_BES2700YP_IRQ=y','CONFIG_GPIO_BES2700YP_IRQ=n','config')
+        case.check('gpio-irq-contract')
+        case=self.make_fixture();case.change('bth','gpio-controller;','interrupt-parent = <&nvic>; interrupts = <44 3>; gpio-controller;')
+        case.check('gpio-service-owner')

@@ -39,7 +39,9 @@ zephyr_compile_options(-ffile-prefix-map=${bes_workspace}=workspace
   $<$<COMPILE_LANGUAGE:ASM>:-Wa,--debug-prefix-map=${bes_build}=build>)
 
 if(CONFIG_BES2700YP_GPIO_VALIDATION GREATER 0)
-  if(CONFIG_BES2700_M55_RESTART)
+  if(CONFIG_GPIO_BES2700YP_IRQ)
+    target_sources(app PRIVATE src/gpio_irq_validation.c)
+  elseif(CONFIG_BES2700_M55_RESTART)
     target_sources(app PRIVATE src/gpio_restart.c)
   else()
     target_sources(app PRIVATE src/gpio_validation.c)

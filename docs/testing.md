@@ -308,3 +308,7 @@ a system-only descriptor does not provide UART readback support.
 `gpio-input` and `gpio-led` combine sequential IPC with manual button cycles and optional LED output. See [wiring, electrical checks, operation and acceptance](gpio.md). Use `analyze_dual_message.py --scope short` with the matching release/layout.json.
 
 Standard GPIO API profiles are `gpio-api-input` (manual keys; message analyzer) and `gpio-api-led-restart` (automatic output across normal M55 restarts; restart analyzer). Both support post-functional short observation. See [the API and operating limits](gpio.md#standard-zephyr-gpio-api).
+
+Key edge IRQ profiles are `gpio-irq-input`, `gpio-irq-restart` and `gpio-irq-recovery`.
+They require explicit key interaction, retained routing and real ISR evidence;
+see [the edge IRQ contract and stage sequence](gpio.md#key-edge-interrupts).

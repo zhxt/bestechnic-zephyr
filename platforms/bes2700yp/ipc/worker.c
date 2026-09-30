@@ -341,7 +341,17 @@ static void worker(void *a,void *b,void *c)
 #ifdef CONFIG_BES2700_M55_RESTART
  worker_idle=0;
 #endif
+#if defined(CONFIG_BES2700YP_GPIO_IRQ_VALIDATION) && !defined(CC_BTH)
+ /* q_prepare publishes seq=0 while M55 is parked; only the BTH worker
+  * changes it. Wait before registering mailbox IRQs or starting deadlines.
+  * Heartbeat runs independently. No runtime protocol field is repurposed. */
+ int64_t gate_deadline=k_uptime_get()+185000;
+ while(!RING(0)->state.seq && k_uptime_get()<gate_deadline){k_msleep(1);}
+ __DMB();
+ int rc=RING(0)->state.seq?exercise():Q_TIMEOUT;
+#else
  int rc=exercise();
+#endif
  if(rc) { own.error=rc;own.phase=Q_FAILED;(void)stats();publish();(void)notify(); }
  update_report(1,rc);
 #ifdef CONFIG_BES2700_M55_RESTART

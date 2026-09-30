@@ -20,7 +20,7 @@ FIELDS = {
 def run(text, manifest, core):
     scenario = get_profile(manifest['validation_profile'])
     mode = scenario.gpio_mode
-    if not mode:
+    if not mode or scenario.gpio_irq:
         return core(text, manifest)
     base, rows, errors, missing = [], [], [], []
     service = manifest.get('gpio_service', {})

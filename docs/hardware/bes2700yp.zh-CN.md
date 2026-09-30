@@ -84,7 +84,7 @@ M55 故障隔离提供可选 `m55-ready-timeout` 和 `m55-heartbeat-stop` 场景
 | 音频 | 尚未接入 ADC/DAC、I²S/TDM/SPDIF/DMIC、ANC/EQ 等音频路径 |
 | Sensor Hub / BECO NPU | 尚未包含该子系统的启动、Zephyr 目标或 NPU 运行接口 |
 | Flash 读写 | HAL 支持启动所需的 Flash 操作；尚未提供 Zephyr Flash 驱动或应用可用的标准读写接口 |
-| GPIO | 可选受限 Zephyr GPIO 驱动：P2_0/P2_1 上拉输入、P1_4 输出；仅线程上下文，无 IRQ |
+| GPIO | 可选受限 Zephyr GPIO 驱动：P2_0/P2_1 上拉输入、P1_4 输出；线程数据访问；可选 P2_0/P2_1 边沿 IRQ callback |
 | I²C、SPI、PWM、GPADC、DMA、看门狗 | 尚未提供对应的 BES2700YP Zephyr 驱动 |
 | 安全资源 | 尚未集成安全引擎、TRNG、eFuse 或安全启动验证；当前镜像 CRC 检查仅用于完整性校验 |
 
@@ -156,8 +156,8 @@ mailbox 两端使用 SYS `[0x500000a0, 0x500000a8)` 与 BTH `[0x40000134, 0x4000
 
 IRQ 身份为 `(core, interrupt controller, IRQ)`。当前 mailbox RX/TX_DONE 分别为
 BTH 39/37、M55 41/39，优先级 3；BTH UART0 使用 IRQ 17、优先级 2。
-两核均使用三位优先级，BTH/M55 分别配置 64/72 个外部 IRQ。当前移植尚未确认 AON GPIO 的实际路由，
-不能通过跨核复制 IRQ 数字来选择它。
+两核均使用三位优先级，BTH/M55 分别配置 64/72 个外部 IRQ。可选按键驱动使用 BTH PSC/AON IRQ 44；其他 GPIO 路由
+不能通过跨核复制 IRQ 数字来推断。
 
 ### 内存所有权与别名
 
@@ -188,4 +188,4 @@ UART 交接需要发送排空、IRQ/状态所有权移交及唯一运行期写�
 
 ## 受限 GPIO 场景
 
-可选的 [GPIO 验证](../gpio.zh-CN.md)服务轮询 P2_0/P2_1，并可驱动 P1_4，保持 P1_5 和 UART 引脚原状。普通场景不启用。标准 API 场景在相同服务上注册受限 Zephyr GPIO 控制器；未提供 pinctrl 和 GPIO 中断支持。实际板卡接线及电平需确认。
+可选的 [GPIO 验证](../gpio.zh-CN.md)服务轮询 P2_0/P2_1，并可驱动 P1_4，保持 P1_5 和 UART 引脚原状。普通场景不启用。标准 API 场景在相同服务上注册受限 Zephyr GPIO 控制器；未提供 pinctrl；独立按键 IRQ 场景使用受限 BTH PSC/AON 入口。实际板卡接线及电平需确认。

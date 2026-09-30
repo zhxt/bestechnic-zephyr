@@ -12,6 +12,9 @@
 #include "bth_contract.h"
 #include "m55_payload.h"
 #include "message.h"
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+#include <bes2700yp_gpio_irq_validation.h>
+#endif
 #if CONFIG_BES2700YP_GPIO_VALIDATION == 2 && defined(CONFIG_GPIO_BES2700YP)
 #define GPIO_RESTART_PROBE 1
 #include <bes2700yp_gpio_restart.h>
@@ -101,6 +104,28 @@ static int observe_checkpoint(unsigned scope, uint32_t ms)
  field(" samples=",monitor_samples);field(" rc=",rc);end();
  return rc;
 }
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+static int gpio_irq_stage(uint32_t stage)
+{
+ k_mutex_lock(&log_lock,K_FOREVER);
+ int rc=bes_gpio_irq_validation_start(stage);
+ k_mutex_unlock(&log_lock);
+ while(!rc && !bes_gpio_irq_validation_done() && !monitor_error){
+  k_mutex_lock(&log_lock,K_FOREVER);
+  rc=bes_gpio_irq_validation_poll();
+  k_mutex_unlock(&log_lock);
+  if(!rc){k_msleep(10);}
+ }
+ return rc || monitor_error ? 47 : 0;
+}
+static int gpio_irq_checkpoint(uint32_t id)
+{
+ k_mutex_lock(&log_lock,K_FOREVER);
+ int rc=bes_gpio_irq_validation_check(id);
+ k_mutex_unlock(&log_lock);
+ return rc?47:0;
+}
+#endif
 /* Independent liveness while manager copies/CRCs peer memory. UART serialized.
  * The manager publishes its terminal state under log_lock; only then may this
  * thread inspect reset/mailbox. Short success leaves this monitor running. */
@@ -133,6 +158,9 @@ static void monitor(void *a,void *b,void *c)
    if(rc) { monitor_error=46;break; }
   }
 #endif
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+  if(functional && gpio_irq_checkpoint(1000U+i)){monitor_error=47;break;}
+#endif
   if(!functional && ms>=BES_OBSERVATION_LONG_MS) { monitor_error=31;break; }
   if(scope) {
    rc=observe_checkpoint(scope,ms);
@@ -149,6 +177,14 @@ static void monitor(void *a,void *b,void *c)
 }
 static int observe_terminal(int rc, uint32_t attempts, uint32_t recoveries)
 {
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+ if(!rc){rc=gpio_irq_stage(11);}
+ if(!rc){
+  k_mutex_lock(&log_lock,K_FOREVER);
+  rc=bes_gpio_irq_validation_result()?47:0;
+  k_mutex_unlock(&log_lock);
+ }
+#endif
  if (!rc && resource_check(4)) { rc=45; }
  if(!rc && !monitor_error) {
   observe_begin("functional",0);
@@ -282,6 +318,13 @@ static int session_finish(unsigned round,uint32_t start)
  k_mutex_unlock(&log_lock);
  if(gpio_rc) { return 46; }
 #endif
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+ if(!round && gpio_irq_stage(10)){return 47;}
+ if(gpio_irq_checkpoint(100U+round*2U)){return 47;}
+ /* Interactive evidence precedes the traffic timing interval. */
+ if(peer_read(&peer) || !peer_ok(&peer)){return 23;}
+ bes_peer_health_init(&health,k_uptime_get());
+#endif
  q_start();deadline=k_uptime_get()+BES_LIFECYCLE_MESSAGE_MS;
  struct q_report r={0};struct bes_peer_progress progress;
  bes_peer_progress_init(&progress,k_uptime_get());uint32_t base_ms=peer.ms;
@@ -340,6 +383,9 @@ static int session_finish(unsigned round,uint32_t start)
  gpio_rc=bes_gpio_restart_checkpoint(round,1);
  k_mutex_unlock(&log_lock);
  if(gpio_rc) { return 46; }
+#endif
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+ if(gpio_irq_checkpoint(101U+round*2U)){return 47;}
 #endif
  event(round,8,0,k_uptime_get_32()-start);
  begin("session",0);field(" round=",round);field(" session=",generation);
@@ -439,8 +485,14 @@ static int isolation_run(void)
    field(" elapsed=",k_uptime_get_32()-start);field(" rc=",0);end();
    if(service(DUAL_CHECK_CLOCK,0)) { rc=16; }
    else {
-    q_start();int64_t deadline=k_uptime_get()+BES_LIFECYCLE_READY_MS;
-    while(!fault && !monitor_error && k_uptime_get()<deadline) {
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+    rc=gpio_irq_stage(10);
+    bes_peer_health_init(&health,k_uptime_get());
+    bes_peer_progress_init(&progress,k_uptime_get());
+#endif
+    if(!rc){q_start();}
+    int64_t deadline=k_uptime_get()+BES_LIFECYCLE_READY_MS;
+    while(!rc && !fault && !monitor_error && k_uptime_get()<deadline) {
      k_msleep(BES_PEER_POLL_MS);readable=peer_read(&peer)==0;
      fault=poll_health(&health,&peer,readable);q_snapshot(&report);
 #if CONFIG_BES2700_M55_FAULT_CASE == 3
@@ -586,6 +638,9 @@ int bes2700_lifecycle_validate(void)
   k_timer_start(&timer,K_MSEC(100),K_MSEC(100));k_sem_give(&monitor_start);
 #if CONFIG_BES2700_M55_FAULT_CASE > 0
   (void)isolation_run();
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+  bes_gpio_irq_validation_end();
+#endif
   k_timer_stop(&timer);bth_log_reset();return 0;
 #else
   for(unsigned i=0;i<BES_LIFECYCLE_ROUNDS;i++) {
@@ -594,6 +649,9 @@ int bes2700_lifecycle_validate(void)
   rc=observe_terminal(rc,0,0);
 #endif
  }
+#ifdef CONFIG_GPIO_BES2700YP_IRQ
+ bes_gpio_irq_validation_end();
+#endif
 #ifdef GPIO_RESTART_PROBE
  bes_gpio_restart_end();
 #endif
